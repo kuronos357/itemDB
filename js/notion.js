@@ -541,6 +541,10 @@ export class NotionClient {
    * 指定した場所 (pageId) に現在置かれている物品一覧を取得 (物品DB/データソースをクエリ)
    */
   async queryItemsByLocation(locationPageId) {
+    if (!state.config.itemDbId || !state.config.locationDbId) {
+      if (state.config.dbId) await this.resolveDatabases(state.config.dbId).catch(() => {});
+    }
+
     const itemTargetId = state.config.itemDbId || state.config.dbId;
     if (!itemTargetId) return [];
 
@@ -587,9 +591,101 @@ export class NotionClient {
   }
 
   /**
+   * 指定した場所レコードに所属する物品一覧を完全取得
+   * (場所自体の「目録」リレーションと、物品DBへの「物理アドレス」検索クエリの両面から確実に集約)
+   */
+  async getItemsForLocation(locationRecord) {
+    if (!locationRecord || !locationRecord.pageId) return [];
+
+    const itemsMap = new Map();
+
+    // 1. 物品DBへの逆引きクエリ (queryItemsByLocation)
+    try {
+      const queriedItems = await this.queryItemsByLocation(locationRecord.pageId);
+      for (const item of queriedItems) {
+        if (item && item.pageId) {
+          itemsMap.set(item.pageId, item);
+        }
+      }
+    } catch (e) {
+      console.warn('[NotionClient] queryItemsByLocation failed, fallback to direct relation:', e);
+    }
+
+    // 2. 場所レコード自体が持つ itemPageIds (目録リレーション) の直接取得
+    const directIds = locationRecord.itemPageIds || [];
+    const missingIds = directIds.filter(id => !itemsMap.has(id));
+
+    if (missingIds.length > 0) {
+      try {
+        const fetchedList = await Promise.all(
+          missingIds.map(id => this.fetchPage(id).catch(err => {
+            console.warn(`[NotionClient] fetchPage failed for item ${id}:`, err);
+            return null;
+          }))
+        );
+        for (const item of fetchedList) {
+          if (item && item.pageId) {
+            itemsMap.set(item.pageId, item);
+          }
+        }
+      } catch (e) {
+        console.warn('[NotionClient] Fetching direct itemPageIds failed:', e);
+      }
+    }
+
+    // ID順または名前順にソートして返却
+    return Array.from(itemsMap.values()).sort((a, b) => {
+      if (a.id != null && b.id != null) return Number(a.id) - Number(b.id);
+      return (a.name || '').localeCompare(b.name || '');
+    });
+  }
+
+  /**
+   * サブ場所（下位階層: 段・引き出し・ボックス等）のレコード一覧を取得
+   */
+  async getSubLocations(locationRecord) {
+    if (!locationRecord || !locationRecord.subLocationPageIds || locationRecord.subLocationPageIds.length === 0) {
+      return [];
+    }
+
+    try {
+      const subPages = await Promise.all(
+        locationRecord.subLocationPageIds.map(id => this.fetchPage(id).catch(() => null))
+      );
+      return subPages.filter(Boolean).sort((a, b) => {
+        if (a.id != null && b.id != null) return Number(a.id) - Number(b.id);
+        return (a.name || '').localeCompare(b.name || '');
+      });
+    } catch (e) {
+      console.warn('[NotionClient] getSubLocations failed:', e);
+      return [];
+    }
+  }
+
+  /**
+   * 親場所（上位階層: 部屋・カラーボックス等）のレコードを取得
+   */
+  async getParentLocation(locationRecord) {
+    if (!locationRecord || !locationRecord.parentLocationPageIds || locationRecord.parentLocationPageIds.length === 0) {
+      return null;
+    }
+
+    try {
+      return await this.fetchPage(locationRecord.parentLocationPageIds[0]);
+    } catch (e) {
+      console.warn('[NotionClient] getParentLocation failed:', e);
+      return null;
+    }
+  }
+
+  /**
    * 物品の現在地（リレーション）を更新 (物品ページのプロパティをPATCH)
    */
   async updateItemLocation(itemPageId, locationPageId) {
+    if (!state.config.itemDbId || !state.config.locationDbId) {
+      if (state.config.dbId) await this.resolveDatabases(state.config.dbId).catch(() => {});
+    }
+
     const itemTargetId = state.config.itemDbId || state.config.dbId;
     let locPropName = state.config.propMapping.location || '物理アドレス';
     try {
@@ -783,10 +879,33 @@ export class NotionClient {
       idVal = Number(titleVal.trim());
     }
 
+    // リレーションの正確な種別判定（物品側・場所側・階層を分離）
+    const itemProp = props['目録']
+      || props['物品']
+      || props['アイテム']
+      || props['収容物'];
+    const itemPageIds = (itemProp?.type === 'relation' && itemProp.relation)
+      ? itemProp.relation.map(r => r.id)
+      : [];
+
+    const parentProp = props['親アイテム'] || props['親'] || props['上位'];
+    const parentLocationPageIds = (parentProp?.type === 'relation' && parentProp.relation)
+      ? parentProp.relation.map(r => r.id)
+      : [];
+
+    const subProp = props['サブアイテム'] || props['子'] || props['下位'];
+    const subLocationPageIds = (subProp?.type === 'relation' && subProp.relation)
+      ? subProp.relation.map(r => r.id)
+      : [];
+
+    // 物品側から見た場所へのリレーション
     let locationRelation = [];
     const locProp = props[propMapping.location]
-      || Object.values(props).find(p => p.type === 'relation' && ['現在地', '場所', '保管場所', '収納先', '配置場所', '配置先'].includes(p.name))
-      || Object.values(props).find(p => p.type === 'relation');
+      || props['物理アドレス']
+      || props['現在地']
+      || props['場所']
+      || props['保管場所']
+      || props['収納先'];
     if (locProp && locProp.type === 'relation') {
       locationRelation = locProp.relation || [];
     }
@@ -825,6 +944,9 @@ export class NotionClient {
       id: idVal,
       name: titleVal || (idVal != null ? `ID: ${idVal}` : '名称未設定'),
       locationPageIds: locationRelation.map(r => r.id),
+      itemPageIds,
+      parentLocationPageIds,
+      subLocationPageIds,
       status: statusVal,
       notes: notesVal,
       attributes,

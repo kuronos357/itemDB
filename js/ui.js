@@ -175,8 +175,17 @@ class UIManager {
   /**
    * 物品詳細画面の描画 (Even ID)
    */
-  renderItemView(item, locationRecord = null) {
-    const locationName = locationRecord ? locationRecord.name : (item.locationPageIds && item.locationPageIds.length > 0 ? '場所ID確認中...' : '未配置');
+  renderItemView(item, locationRecord = null, parentLocation = null) {
+    let locationDisplayName = '未配置';
+    if (locationRecord) {
+      if (parentLocation) {
+        locationDisplayName = `${parentLocation.name} ＞ ${locationRecord.name}`;
+      } else {
+        locationDisplayName = locationRecord.name;
+      }
+    } else if (item.locationPageIds && item.locationPageIds.length > 0) {
+      locationDisplayName = '場所ID確認中...';
+    }
     const locationId = locationRecord?.id;
 
     let html = `
@@ -195,9 +204,9 @@ class UIManager {
 
           <div class="property-grid mt-3">
             <div class="prop-item highlight-prop">
-              <span class="prop-label">現在地 (置き場所)</span>
+              <span class="prop-label">現在地 (物理アドレス)</span>
               <div class="prop-val-row">
-                <span class="prop-value location-val">${locationName}</span>
+                <span class="prop-value location-val">${locationDisplayName}</span>
                 ${locationId ? `<button class="btn-text" id="btn-jump-location" data-loc-id="${locationId}">場所を見る</button>` : ''}
               </div>
             </div>
@@ -288,11 +297,16 @@ class UIManager {
   /**
    * 場所詳細画面の描画 (Odd ID)
    */
-  renderLocationView(location, items = []) {
+  renderLocationView(location, items = [], subLocations = [], parentLocation = null) {
     let html = `
       <div class="view-location-detail">
-        <div class="breadcrumb">
+        <div class="breadcrumb space-between">
           <button id="btn-back-home" class="btn-link">← スキャンに戻る</button>
+          ${parentLocation ? `
+            <button class="btn-link parent-link" id="btn-jump-parent" data-loc-id="${parentLocation.id}">
+              📂 上位: ${parentLocation.name || `#${parentLocation.id}`}
+            </button>
+          ` : ''}
         </div>
 
         <div class="card detail-card">
@@ -310,16 +324,42 @@ class UIManager {
           ` : ''}
 
           <div class="action-buttons mt-3 mb-3">
-            <button id="btn-edit-batch" class="btn btn-primary btn-large">
+            <button id="btn-add-item-to-location" class="btn btn-primary btn-large">
+              <span class="btn-icon">➕</span>
+              <span>物品を追加</span>
+            </button>
+            <button id="btn-edit-batch" class="btn btn-secondary">
               <span class="btn-icon">⚡</span>
-              <span>編集 (一括棚卸 / スキャン)</span>
+              <span>一括棚卸</span>
             </button>
             ${location.url ? `
               <a href="${location.url}" target="_blank" rel="noopener" class="btn btn-outline">
-                <span>Notionで開く ↗</span>
+                <span>Notion ↗</span>
               </a>
             ` : ''}
           </div>
+
+          ${subLocations && subLocations.length > 0 ? `
+            <div class="sublocation-section mt-3 mb-3">
+              <div class="section-header">
+                <h4>📂 収納スペース・段一覧 (${subLocations.length}箇所)</h4>
+              </div>
+              <div class="sublocation-grid mt-2">
+                ${subLocations.map(sub => `
+                  <div class="sublocation-card" data-sub-id="${sub.id}">
+                    <div class="sublocation-card-info">
+                      <span class="badge badge-odd badge-small">場所</span>
+                      <span class="sublocation-name">${sub.name || '名称未設定'}</span>
+                    </div>
+                    <div class="sublocation-card-action">
+                      <span class="item-compact-id">#${sub.id}</span>
+                      <button class="btn-text btn-jump-sub" data-sub-id="${sub.id}">開く →</button>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
 
           <div class="location-items-section mt-3">
             <div class="section-header space-between">
@@ -329,7 +369,7 @@ class UIManager {
             ${items.length === 0 ? `
               <div class="empty-state">
                 <p>現在この場所に登録されている物品はありません。</p>
-                <p class="text-sub">上の「編集」ボタンを押して物品をスキャンすると追加できます。</p>
+                <p class="text-sub">上の「➕ 物品を追加」または「⚡ 一括棚卸」から物品を指定できます。</p>
               </div>
             ` : `
               <div class="item-list">
@@ -338,8 +378,12 @@ class UIManager {
                     <div class="item-compact-info">
                       <span class="badge badge-even badge-small">物品</span>
                       <span class="item-compact-name">${item.name || '名称未設定'}</span>
+                      ${item.attributes && item.attributes.length > 0 ? `<span class="badge badge-tag badge-small">${item.attributes[0]}</span>` : ''}
                     </div>
-                    <span class="item-compact-id">#${item.id}</span>
+                    <div class="item-compact-actions">
+                      <span class="item-compact-id">#${item.id}</span>
+                      <button class="btn-text text-danger btn-unlink-item" data-item-page-id="${item.pageId}" data-item-name="${item.name || item.id}" title="この場所から解除">解除</button>
+                    </div>
                   </div>
                 `).join('')}
               </div>

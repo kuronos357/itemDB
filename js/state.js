@@ -48,13 +48,56 @@ class StateStore extends EventTarget {
       propMapping: this._loadPropMapping()
     };
 
+    // 以前のセッションで逆転保存されたIDや旧設定の自己修復
+    this.autoHealConfig();
+
     this.currentMode = AppMode.HOME;
     this.currentItem = null;      // 現在表示中の物品データ
     this.currentLocation = null;  // 現在表示中の場所データ
+    this.parentLocation = null;   // 現在の場所の親場所データ（階層構造）
+    this.subLocations = [];       // 現在の場所に含まれる子場所データ（階層構造）
     this.locationItems = [];      // 現在の場所に属している物品一覧
     this.history = this._loadHistory();
     this.pendingMoveItem = null;  // 場所変更待ち状態の物品データ
     this.isProcessing = false;    // APIリクエスト中フラグ
+  }
+
+  /**
+   * 過去バージョンの誤認（物理アドレスが物品DBとして保存されていたケース等）を自己修復
+   */
+  autoHealConfig() {
+    let changed = false;
+    const updates = {};
+
+    const cleanItem = (this.config.itemDbId || '').replace(/-/g, '');
+    const cleanLoc = (this.config.locationDbId || '').replace(/-/g, '');
+
+    // 既知の「目録(物品)」と「物理アドレス(場所)」が逆転している場合の自動補正
+    const KNOWN_ITEM_DS = '3dc5e314fd47809088a5000b035baac0';
+    const KNOWN_LOC_DS = '3e05e314fd4780e2a08a000b4bc0c86a';
+
+    if (cleanItem === KNOWN_LOC_DS && cleanLoc === KNOWN_ITEM_DS) {
+      console.warn('[State] 物品DBと場所DBの割り当て逆転を自動修復します');
+      updates.itemDbId = KNOWN_ITEM_DS;
+      updates.locationDbId = KNOWN_LOC_DS;
+      changed = true;
+    } else if (cleanItem === KNOWN_LOC_DS && !cleanLoc) {
+      updates.itemDbId = KNOWN_ITEM_DS;
+      updates.locationDbId = KNOWN_LOC_DS;
+      changed = true;
+    }
+
+    // propMappingの旧プロパティ名「現在地」を「物理アドレス」に自動移行
+    const mapping = { ...this.config.propMapping };
+    if (mapping.location === '現在地') {
+      mapping.location = '物理アドレス';
+      updates.propMapping = mapping;
+      changed = true;
+    }
+
+    if (changed) {
+      this.saveConfig(updates);
+    }
   }
 
   _loadPropMapping() {

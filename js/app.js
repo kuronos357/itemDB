@@ -20,21 +20,27 @@ class Application {
     if (this.initialized) return;
     this.initialized = true;
 
+    // 1. 設定の自己修復（逆転IDや旧プロパティ名などの補正）
+    state.autoHealConfig();
+    if (state.isConfigured() && state.config.dbId) {
+      notion.resolveDatabases(state.config.dbId).catch(() => {});
+    }
+
     ui.init();
     this._bindEvents();
 
-    // 1. URLパラメータの初期判定 (?dbid=...&api=... または ?id=...)
+    // 2. URLパラメータの初期判定 (?dbid=...&api=... または ?id=...)
     const handledUrl = await this._handleUrlParams();
 
-    // 2. 該当するURLパラメータがなければホーム（待機スキャン）画面を描画
+    // 3. 該当するURLパラメータがなければホーム（待機スキャン）画面を描画
     if (!handledUrl) {
       this.switchMode(AppMode.HOME);
     }
 
-    // 3. Web NFC をバックグラウンドで開始（対応ブラウザのみ）
+    // 4. Web NFC をバックグラウンドで開始（対応ブラウザのみ）
     scanner.startNfc().catch(() => {});
 
-    // 4. Service Worker登録 (PWA)
+    // 5. Service Worker登録 (PWA)
     if ('serviceWorker' in navigator && window.location.protocol === 'https:') {
       navigator.serviceWorker.register('./sw.js').catch(err => {
         console.warn('[PWA] Service Worker registration failed:', err);
@@ -160,6 +166,38 @@ class Application {
         return;
       }
 
+      // 場所画面: 親場所（上位）へジャンプ
+      const jumpParentBtn = e.target.closest('#btn-jump-parent');
+      if (jumpParentBtn) {
+        const locId = jumpParentBtn.dataset.locId;
+        if (locId) this.onIdScanned(locId);
+        return;
+      }
+
+      // 場所画面: 子場所（下位・段・ボックス）へジャンプ
+      const jumpSubBtn = e.target.closest('.btn-jump-sub') || e.target.closest('.sublocation-card');
+      if (jumpSubBtn) {
+        const subId = jumpSubBtn.dataset.subId;
+        if (subId) this.onIdScanned(subId);
+        return;
+      }
+
+      // 場所画面: 「物品を追加」ボタン（手入力・スキャンで直ちに現在地に登録）
+      if (e.target.closest('#btn-add-item-to-location')) {
+        ui.openKeypad('物品ID (偶数) を入力して追加', '', (val) => this._addItemToCurrentLocation(val));
+        return;
+      }
+
+      // 場所画面: 物品一覧の「解除」ボタン
+      const unlinkBtn = e.target.closest('.btn-unlink-item');
+      if (unlinkBtn) {
+        e.stopPropagation();
+        const pageId = unlinkBtn.dataset.itemPageId;
+        const name = unlinkBtn.dataset.itemName;
+        if (pageId) this._removeItemFromCurrentLocation(pageId, name);
+        return;
+      }
+
       // 場所変更待ち画面: 手入力
       if (e.target.closest('#btn-manual-location-id')) {
         ui.openKeypad('場所ID (奇数) を入力', '', (val) => this.onIdScanned(val));
@@ -176,7 +214,7 @@ class Application {
         return;
       }
 
-      // 場所画面: 「編集 (一括棚卸)」ボタン
+      // 場所画面: 「一括棚卸」ボタン
       if (e.target.closest('#btn-edit-batch')) {
         this.switchMode(AppMode.LOCATION_EDIT_BATCH);
         return;
@@ -271,7 +309,7 @@ class Application {
         break;
 
       case AppMode.ITEM_VIEW:
-        ui.renderItemView(state.currentItem, state.currentLocation);
+        ui.renderItemView(state.currentItem, state.currentLocation, state.parentLocation);
         break;
 
       case AppMode.CHANGE_LOCATION_PENDING:
@@ -280,7 +318,7 @@ class Application {
         break;
 
       case AppMode.LOCATION_VIEW:
-        ui.renderLocationView(state.currentLocation, state.locationItems);
+        ui.renderLocationView(state.currentLocation, state.locationItems, state.subLocations, state.parentLocation);
         break;
 
       case AppMode.LOCATION_EDIT_BATCH:
@@ -363,9 +401,13 @@ class Application {
         state.currentItem = record;
         // 現在地の場所レコードを取得 (リレーションから場所ページを取得)
         state.currentLocation = null;
+        state.parentLocation = null;
         if (record.locationPageIds && record.locationPageIds.length > 0) {
           try {
             state.currentLocation = await notion.fetchPage(record.locationPageIds[0]);
+            if (state.currentLocation) {
+              state.parentLocation = await notion.getParentLocation(state.currentLocation);
+            }
           } catch (e) {
             console.warn('[App] Could not fetch parent location:', e);
           }
@@ -374,11 +416,91 @@ class Application {
       } else {
         // 場所 (Location)
         state.currentLocation = record;
-        state.locationItems = await notion.queryItemsByLocation(record.pageId);
+        // 所属物品の取得（場所自体の目録リレーション＋物品DB検索の両面から確実に取得）
+        state.locationItems = await notion.getItemsForLocation(record);
+        // 親場所（上位階層: カラーボックスなど）の取得
+        state.parentLocation = await notion.getParentLocation(record);
+        // 子場所（下位階層: １段目、２段目などの段・ボックス）の取得
+        state.subLocations = await notion.getSubLocations(record);
+
         await this.switchMode(AppMode.LOCATION_VIEW);
       }
     } catch (err) {
       ui.showToast(`取得エラー: ${err.message}`, 'error');
+      feedback.playError();
+    } finally {
+      ui.setLoading(false);
+    }
+  }
+
+  /**
+   * 場所詳細画面から物品を直接追加（手入力またはスキャン）
+   */
+  async _addItemToCurrentLocation(rawId) {
+    const parsed = state.constructor.parseId(rawId);
+    if (!parsed || !parsed.isItem) {
+      ui.showToast('追加する物品は偶数IDで指定してください', 'warning');
+      feedback.playError();
+      return;
+    }
+
+    const currentLoc = state.currentLocation;
+    if (!currentLoc) return;
+
+    ui.setLoading(true, `物品 #${parsed.raw} を確認中...`);
+    try {
+      let itemRecord = await notion.findRecordById(parsed.raw, true);
+      if (!itemRecord) {
+        const ok = confirm(`ID #${parsed.raw} は未登録の物品です。新規作成して「${currentLoc.name}」に追加しますか？`);
+        if (!ok) {
+          ui.setLoading(false);
+          return;
+        }
+        itemRecord = await notion.createRecord({
+          numericId: parsed.raw,
+          name: `物品 #${parsed.raw}`,
+          isItem: true,
+          locationPageId: currentLoc.pageId
+        });
+      } else {
+        itemRecord = await notion.updateItemLocation(itemRecord.pageId, currentLoc.pageId);
+      }
+
+      // locationItems に即座に反映
+      const existsIndex = state.locationItems.findIndex(i => String(i.id) === String(parsed.raw));
+      if (existsIndex >= 0) {
+        state.locationItems[existsIndex] = itemRecord;
+      } else {
+        state.locationItems.unshift(itemRecord);
+      }
+
+      feedback.playAdded();
+      ui.showToast(`「${itemRecord.name}」を「${currentLoc.name}」に追加しました`, 'added');
+      ui.renderLocationView(state.currentLocation, state.locationItems, state.subLocations, state.parentLocation);
+    } catch (err) {
+      ui.showToast(`追加エラー: ${err.message}`, 'error');
+      feedback.playError();
+    } finally {
+      ui.setLoading(false);
+    }
+  }
+
+  /**
+   * 場所詳細画面から物品の紐付けを解除
+   */
+  async _removeItemFromCurrentLocation(itemPageId, itemName) {
+    const ok = confirm(`「${itemName}」をこの場所から解除しますか？`);
+    if (!ok) return;
+
+    ui.setLoading(true, '場所の紐付けを解除中...');
+    try {
+      await notion.updateItemLocation(itemPageId, null);
+      state.locationItems = state.locationItems.filter(i => i.pageId !== itemPageId);
+      feedback.playRemoved();
+      ui.showToast(`「${itemName}」の配置を解除しました`, 'removed');
+      ui.renderLocationView(state.currentLocation, state.locationItems, state.subLocations, state.parentLocation);
+    } catch (err) {
+      ui.showToast(`解除エラー: ${err.message}`, 'error');
       feedback.playError();
     } finally {
       ui.setLoading(false);
