@@ -54,8 +54,12 @@ class Application {
       this.onIdScanned(e.detail.id);
     });
 
+    scanner.addEventListener('setup-config-scanned', (e) => {
+      this._applySetupConfig(e.detail);
+    });
+
     scanner.addEventListener('setup-url-scanned', (e) => {
-      this._applySetupConfig(e.detail.dbid, e.detail.api);
+      this._applySetupConfig(e.detail);
     });
 
     scanner.addEventListener('scan-invalid', () => {
@@ -199,11 +203,18 @@ class Application {
   async _handleUrlParams() {
     const params = new URLSearchParams(window.location.search);
 
-    // 1. 初期設定URL: ?dbid=...&api=...
-    const dbid = params.get('dbid');
-    const api = params.get('api');
-    if (dbid && api) {
-      await this._applySetupConfig(dbid, api);
+    // 1. 初期設定URL: ?dbid=...&api=... 等
+    const dbid = params.get('dbid') || params.get('db') || params.get('db_id') || params.get('database_id') || params.get('databaseId');
+    const api = params.get('api') || params.get('apiKey') || params.get('api_key') || params.get('key') || params.get('token') || params.get('secret');
+    const locid = params.get('locationDbId') || params.get('locid') || params.get('location_db_id');
+    const proxy = params.get('proxy') || params.get('proxyMode');
+    if (dbid || api) {
+      await this._applySetupConfig({
+        dbId: dbid,
+        apiKey: api,
+        locationDbId: locid,
+        proxyMode: proxy
+      });
       // URLから秘密トークンを除去
       const cleanUrl = window.location.pathname;
       window.history.replaceState({}, document.title, cleanUrl);
@@ -223,22 +234,54 @@ class Application {
   /**
    * 初期設定の適用
    */
-  async _applySetupConfig(dbid, api) {
-    ui.setLoading(true, '初期設定を登録中...');
-    state.saveConfig({ dbId: dbid, apiKey: api });
-    try {
-      const conn = await notion.testConnection();
-      if (conn.isDual) {
-        ui.showToast(`初期設定完了: 物品「${conn.itemDb.title}」⇄ 場所「${conn.locationDb.title}」に接続しました`, 'success', 4500);
-      } else {
-        ui.showToast(`初期設定完了: 「${conn.itemDb.title}」に接続しました`, 'success', 4000);
+  async _applySetupConfig(configInput, legacyApi) {
+    let config = configInput;
+    if (typeof configInput === 'string') {
+      config = { dbId: configInput, apiKey: legacyApi };
+    }
+    if (!config || typeof config !== 'object') return;
+
+    ui.setLoading(true, '設定を登録中...');
+
+    const updates = {};
+    if (config.apiKey) updates.apiKey = config.apiKey;
+    if (config.dbId) updates.dbId = config.dbId;
+    if (config.itemDbId) updates.itemDbId = config.itemDbId;
+    if (config.locationDbId) updates.locationDbId = config.locationDbId;
+    if (config.proxyMode) updates.proxyMode = config.proxyMode;
+    if (config.customProxyUrl) updates.customProxyUrl = config.customProxyUrl;
+
+    state.saveConfig(updates);
+
+    // APIキーとDB IDの両方が揃っている場合は接続テストを実施
+    if (state.isConfigured()) {
+      try {
+        const conn = await notion.testConnection();
+        if (conn.isDual) {
+          ui.showToast(`設定完了: 物品「${conn.itemDb.title}」⇄ 場所「${conn.locationDb.title}」に接続しました`, 'success', 4500);
+        } else {
+          ui.showToast(`設定完了: 「${conn.itemDb.title}」に接続しました`, 'success', 4000);
+        }
+        feedback.playSuccess();
+      } catch (err) {
+        ui.showToast(`設定を保存しましたが接続確認でエラー: ${err.message}`, 'warning', 5000);
+        feedback.playError();
+      } finally {
+        ui.setLoading(false);
+        this.switchMode(AppMode.HOME);
       }
-      feedback.playSuccess();
-    } catch (err) {
-      ui.showToast(`設定を保存しましたが接続確認でエラー: ${err.message}`, 'warning', 5000);
-    } finally {
+    } else {
+      // 一部のみ設定できた場合 (例: APIキーのみスキャンした)
       ui.setLoading(false);
-      this.switchMode(AppMode.HOME);
+      feedback.playScan();
+      if (config.apiKey && !state.config.dbId && !state.config.itemDbId) {
+        ui.showToast('APIキーを登録しました。データベースIDを設定してください。', 'info', 4500);
+      } else if ((config.dbId || config.itemDbId) && !state.config.apiKey) {
+        ui.showToast('データベースIDを登録しました。APIキーを設定してください。', 'info', 4500);
+      } else {
+        ui.showToast('設定を読み込みました。不足している項目を設定してください。', 'info', 4500);
+      }
+      ui.renderSettingsModal();
     }
   }
 
@@ -254,9 +297,7 @@ class Application {
     switch (mode) {
       case AppMode.HOME:
         ui.renderHomeView();
-        if (state.isConfigured()) {
-          setTimeout(() => scanner.startCamera('qr-reader').catch(() => {}), 100);
-        }
+        setTimeout(() => scanner.startCamera('qr-reader').catch(() => {}), 100);
         break;
 
       case AppMode.ITEM_VIEW:
@@ -665,13 +706,17 @@ class Application {
    * 別端末（スマホやWatch）セットアップ用のQRコードを生成
    */
   _generateSetupQr() {
-    const { dbId, apiKey } = state.config;
-    if (!dbId || !apiKey) {
+    const { dbId, apiKey, itemDbId, locationDbId } = state.config;
+    const effectiveDbId = itemDbId || dbId;
+    if (!effectiveDbId || !apiKey) {
       ui.showToast('先にAPIキーとデータベースIDを入力してください', 'warning');
       return;
     }
 
-    const targetUrl = `${window.location.origin}${window.location.pathname}?dbid=${encodeURIComponent(dbId)}&api=${encodeURIComponent(apiKey)}`;
+    let targetUrl = `${window.location.origin}${window.location.pathname}?dbid=${encodeURIComponent(effectiveDbId)}&api=${encodeURIComponent(apiKey)}`;
+    if (locationDbId) {
+      targetUrl += `&locid=${encodeURIComponent(locationDbId)}`;
+    }
     const qrContainer = document.getElementById('setup-qr-preview');
     if (!qrContainer) return;
 

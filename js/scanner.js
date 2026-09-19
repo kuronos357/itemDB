@@ -8,6 +8,7 @@
 
 import { state } from './state.js';
 import { feedback } from './audio.js';
+import { NotionClient } from './notion.js';
 
 class ScannerService extends EventTarget {
   constructor() {
@@ -130,8 +131,9 @@ class ScannerService extends EventTarget {
     this.lastScannedText = decodedText;
     this.lastScannedTime = now;
 
-    // 初期設定URL (?dbid=...&api=...) かどうか判定
-    if (this._checkSetupUrl(decodedText)) {
+    // 設定用QRコード（URL、APIキー、DB ID、JSON等）の検知
+    if (this._checkSetupConfig(decodedText)) {
+      feedback.playScan();
       return;
     }
 
@@ -153,22 +155,113 @@ class ScannerService extends EventTarget {
   }
 
   /**
-   * 初期設定QRコード (?dbid=...&api=...) の検知
+   * 設定用QRコード（URL、APIキー、データベースID、JSON等）の検知・抽出
    */
-  _checkSetupUrl(text) {
+  _checkSetupConfig(text) {
+    if (!text || typeof text !== 'string') return false;
+    const str = text.trim();
+
+    // 1. JSON形式の検出: {"apiKey":"...", "dbId":"..."} 等
+    if (str.startsWith('{') && str.endsWith('}')) {
+      try {
+        const json = JSON.parse(str);
+        if (json && typeof json === 'object') {
+          const apiKey = json.apiKey || json.api || json.api_key || json.key || json.token || json.secret;
+          const dbId = json.dbId || json.db || json.db_id || json.databaseId || json.database_id || json.dbid;
+          const itemDbId = json.itemDbId || json.item_db_id;
+          const locationDbId = json.locationDbId || json.location_db_id || json.locid;
+          const proxyMode = json.proxyMode || json.proxy;
+          const customProxyUrl = json.customProxyUrl || json.proxyUrl;
+
+          if (apiKey || dbId || itemDbId || locationDbId) {
+            const detail = {};
+            if (apiKey) detail.apiKey = String(apiKey).trim();
+            if (dbId) detail.dbId = String(dbId).trim();
+            if (itemDbId) detail.itemDbId = String(itemDbId).trim();
+            if (locationDbId) detail.locationDbId = String(locationDbId).trim();
+            if (proxyMode) detail.proxyMode = String(proxyMode).trim();
+            if (customProxyUrl) detail.customProxyUrl = String(customProxyUrl).trim();
+
+            this.dispatchEvent(new CustomEvent('setup-config-scanned', { detail }));
+            return true;
+          }
+        }
+      } catch {}
+    }
+
+    // 2. URLまたはクエリ文字列形式の検出: ?dbid=...&api=... 等
     try {
-      const url = new URL(text, window.location.origin);
-      const dbid = url.searchParams.get('dbid');
-      const api = url.searchParams.get('api');
-      if (dbid && api) {
-        this.dispatchEvent(new CustomEvent('setup-url-scanned', {
-          detail: { dbid, api }
-        }));
+      const urlCandidate = str.includes('://') ? str : `http://localhost/${str.startsWith('?') ? str : '?' + str}`;
+      const url = new URL(urlCandidate);
+      const params = url.searchParams;
+
+      const apiKey = params.get('api') || params.get('apiKey') || params.get('api_key') || params.get('key') || params.get('token') || params.get('secret');
+      const dbId = params.get('dbid') || params.get('db') || params.get('db_id') || params.get('database_id') || params.get('databaseId');
+      const itemDbId = params.get('itemDbId') || params.get('item_db_id');
+      const locationDbId = params.get('locationDbId') || params.get('locid') || params.get('location_db_id');
+      const proxyMode = params.get('proxy') || params.get('proxyMode');
+      const customProxyUrl = params.get('customProxyUrl') || params.get('proxyUrl');
+
+      if (apiKey || dbId || itemDbId || locationDbId) {
+        const detail = {};
+        if (apiKey) detail.apiKey = apiKey.trim();
+        if (dbId) detail.dbId = dbId.trim();
+        if (itemDbId) detail.itemDbId = itemDbId.trim();
+        if (locationDbId) detail.locationDbId = locationDbId.trim();
+        if (proxyMode) detail.proxyMode = proxyMode.trim();
+        if (customProxyUrl) detail.customProxyUrl = customProxyUrl.trim();
+
+        this.dispatchEvent(new CustomEvent('setup-config-scanned', { detail }));
         return true;
       }
-    } catch {
-      // not a URL
+    } catch {}
+
+    // 3. Notion APIキー単体の検出: ntn_... または secret_...
+    if (/^(ntn_[a-zA-Z0-9_-]+|secret_[a-zA-Z0-9_-]+)$/.test(str)) {
+      this.dispatchEvent(new CustomEvent('setup-config-scanned', {
+        detail: { apiKey: str }
+      }));
+      return true;
     }
+
+    // 4. Notion データベースURLまたは32桁UUID単体の検出
+    if (str.includes('notion.so') || str.includes('notion.com') || /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str) || /^[0-9a-fA-F]{32}$/.test(str)) {
+      if (!/^\d+$/.test(str)) {
+        const extracted = NotionClient.extractDatabaseId(str);
+        if (extracted) {
+          this.dispatchEvent(new CustomEvent('setup-config-scanned', {
+            detail: { dbId: extracted }
+          }));
+          return true;
+        }
+      }
+    }
+
+    // 5. 複数行テキストからの検出 (APIキーやDB URLが混在する形式)
+    if (str.includes('\n')) {
+      const lines = str.split(/\r?\n/);
+      let foundApi = null;
+      let foundDb = null;
+      for (const line of lines) {
+        const l = line.trim();
+        const apiMatch = l.match(/(?:api[_-]?key|api|token|secret)?[:=\s]*(ntn_[a-zA-Z0-9_-]+|secret_[a-zA-Z0-9_-]+)/i);
+        if (apiMatch) foundApi = apiMatch[1];
+
+        const dbMatch = l.match(/(?:db[_-]?id|db|database)?[:=\s]*(https?:\/\/[^\s]+|[0-9a-fA-F-]{32,36})/i);
+        if (dbMatch && !/^\d+$/.test(dbMatch[1])) {
+          const extracted = NotionClient.extractDatabaseId(dbMatch[1]);
+          if (extracted) foundDb = extracted;
+        }
+      }
+      if (foundApi || foundDb) {
+        const detail = {};
+        if (foundApi) detail.apiKey = foundApi;
+        if (foundDb) detail.dbId = foundDb;
+        this.dispatchEvent(new CustomEvent('setup-config-scanned', { detail }));
+        return true;
+      }
+    }
+
     return false;
   }
 

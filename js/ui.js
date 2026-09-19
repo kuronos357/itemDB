@@ -109,8 +109,8 @@ class UIManager {
           <h3>初期設定が必要です</h3>
         </div>
         <p>Notion APIキーとデータベースIDがまだ登録されていません。</p>
-        <p class="text-sub">設定用QRコードを読み取るか、右上の歯車アイコンから手動入力してください。</p>
-        <button id="btn-open-settings" class="btn btn-primary mt-2">設定を開く</button>
+        <p class="text-sub">下のカメラで設定用QRコード（またはAPIキー）を読み取るか、手動で入力してください。</p>
+        <button id="btn-open-settings" class="btn btn-primary mt-2">設定を手動で入力</button>
       </div>
     `;
   }
@@ -136,7 +136,7 @@ class UIManager {
               <span class="corner br"></span>
               <div class="laser-line"></div>
             </div>
-            <p class="guide-label">QRコードまたはNFCを読み取り</p>
+            <p class="guide-label">${isConfigured ? 'QRコードまたはNFCを読み取り' : '設定QRコードをカメラに向けてください'}</p>
           </div>
         </div>
 
