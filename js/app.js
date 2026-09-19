@@ -62,11 +62,7 @@ class Application {
       ui.showToast('有効なID (数字) またはURLが検出されませんでした', 'warning');
     });
 
-    // ヘッダーナビゲーションボタン
-    document.getElementById('btn-header-home')?.addEventListener('click', () => {
-      this.switchMode(AppMode.HOME);
-    });
-
+    // 設定モーダルの開閉
     document.getElementById('btn-header-settings')?.addEventListener('click', () => {
       ui.renderSettingsModal();
     });
@@ -138,47 +134,9 @@ class Application {
         return;
       }
 
-      // 履歴アイテムクリック
-      const historyItem = e.target.closest('.history-item');
-      if (historyItem) {
-        const id = historyItem.dataset.id;
-        if (id) this.onIdScanned(id);
-        return;
-      }
-
-      // スキャンに戻る
-      if (e.target.closest('#btn-back-home')) {
-        this.switchMode(AppMode.HOME);
-        return;
-      }
-
       // 物品画面: 「場所変更」ボタン
       if (e.target.closest('#btn-change-location')) {
         this.switchMode(AppMode.CHANGE_LOCATION_PENDING);
-        return;
-      }
-
-      // 物品画面: 現在地をクリックして場所画面へジャンプ
-      const jumpLocBtn = e.target.closest('#btn-jump-location');
-      if (jumpLocBtn) {
-        const locId = jumpLocBtn.dataset.locId;
-        if (locId) this.onIdScanned(locId);
-        return;
-      }
-
-      // 場所画面: 親場所（上位）へジャンプ
-      const jumpParentBtn = e.target.closest('#btn-jump-parent');
-      if (jumpParentBtn) {
-        const locId = jumpParentBtn.dataset.locId;
-        if (locId) this.onIdScanned(locId);
-        return;
-      }
-
-      // 場所画面: 子場所（下位・段・ボックス）へジャンプ
-      const jumpSubBtn = e.target.closest('.btn-jump-sub') || e.target.closest('.sublocation-card');
-      if (jumpSubBtn) {
-        const subId = jumpSubBtn.dataset.subId;
-        if (subId) this.onIdScanned(subId);
         return;
       }
 
@@ -188,9 +146,10 @@ class Application {
         return;
       }
 
-      // 場所画面: 物品一覧の「解除」ボタン
+      // 場所画面: 物品一覧の「解除」ボタン (親リンクへの遷移を防止)
       const unlinkBtn = e.target.closest('.btn-unlink-item');
       if (unlinkBtn) {
+        e.preventDefault();
         e.stopPropagation();
         const pageId = unlinkBtn.dataset.itemPageId;
         const name = unlinkBtn.dataset.itemName;
@@ -229,14 +188,6 @@ class Application {
       // 一括編集モード: 手入力
       if (e.target.closest('#btn-manual-batch-item')) {
         ui.openKeypad('物品ID (偶数) を入力', '', (val) => this.onIdScanned(val));
-        return;
-      }
-
-      // 場所画面: 所属物品一覧クリックで物品詳細へジャンプ
-      const compactItem = e.target.closest('.item-card-compact');
-      if (compactItem && state.currentMode === AppMode.LOCATION_VIEW) {
-        const itemId = compactItem.dataset.itemId;
-        if (itemId) this.onIdScanned(itemId);
         return;
       }
     });
@@ -347,6 +298,16 @@ class Application {
 
     const { num, isItem, isLocation } = parsed;
     const numericStr = parsed.raw;
+
+    // 移動待ち・一括編集以外のモードで、URLと異なるIDが指定された場合はURL遷移を行う
+    const currentUrlId = new URLSearchParams(window.location.search).get('id');
+    if (state.currentMode !== AppMode.CHANGE_LOCATION_PENDING &&
+        state.currentMode !== AppMode.LOCATION_EDIT_BATCH &&
+        currentUrlId !== numericStr &&
+        state.currentMode !== null) {
+      window.location.href = `?id=${numericStr}`;
+      return;
+    }
 
     // モード別の分岐処理
     switch (state.currentMode) {
@@ -545,6 +506,10 @@ class Application {
 
       feedback.playSuccess();
       ui.showToast(`置き場所を「${locationRecord.name}」に変更しました`, 'success', 3500);
+
+      if (window.location.search !== `?id=${state.currentItem.id}`) {
+        window.history.replaceState({}, '', `?id=${state.currentItem.id}`);
+      }
 
       await this.switchMode(AppMode.ITEM_VIEW);
     } catch (err) {

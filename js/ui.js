@@ -159,11 +159,11 @@ class UIManager {
           ${historyList.length === 0 ? '<p class="empty-text">履歴はありません</p>' : ''}
           <div class="history-list">
             ${historyList.map(h => `
-              <div class="history-item" data-id="${h.id}">
+              <a href="?id=${h.id}" class="history-item" data-id="${h.id}">
                 <span class="badge ${h.type === 'item' ? 'badge-even' : 'badge-odd'}">${h.type === 'item' ? '物品' : '場所'}</span>
                 <span class="history-name">${h.name || '名称未設定'}</span>
                 <span class="history-id">#${h.id}</span>
-              </div>
+              </a>
             `).join('')}
           </div>
         </div>
@@ -191,7 +191,7 @@ class UIManager {
     let html = `
       <div class="view-item-detail">
         <div class="breadcrumb">
-          <button id="btn-back-home" class="btn-link">← スキャンに戻る</button>
+          <a href="./" id="btn-back-home" class="btn-link">← スキャンに戻る</a>
         </div>
 
         <div class="card detail-card">
@@ -207,7 +207,7 @@ class UIManager {
               <span class="prop-label">現在地 (物理アドレス)</span>
               <div class="prop-val-row">
                 <span class="prop-value location-val">${locationDisplayName}</span>
-                ${locationId ? `<button class="btn-text" id="btn-jump-location" data-loc-id="${locationId}">場所を見る</button>` : ''}
+                ${locationId ? `<a href="?id=${locationId}" class="btn-text btn-jump-link" id="btn-jump-location" data-loc-id="${locationId}">場所を見る →</a>` : ''}
               </div>
             </div>
 
@@ -301,11 +301,11 @@ class UIManager {
     let html = `
       <div class="view-location-detail">
         <div class="breadcrumb space-between">
-          <button id="btn-back-home" class="btn-link">← スキャンに戻る</button>
+          <a href="./" id="btn-back-home" class="btn-link">← スキャンに戻る</a>
           ${parentLocation ? `
-            <button class="btn-link parent-link" id="btn-jump-parent" data-loc-id="${parentLocation.id}">
+            <a href="?id=${parentLocation.id}" class="btn-link parent-link" id="btn-jump-parent" data-loc-id="${parentLocation.id}">
               📂 上位: ${parentLocation.name || `#${parentLocation.id}`}
-            </button>
+            </a>
           ` : ''}
         </div>
 
@@ -346,16 +346,16 @@ class UIManager {
               </div>
               <div class="sublocation-grid mt-2">
                 ${subLocations.map(sub => `
-                  <div class="sublocation-card" data-sub-id="${sub.id}">
+                  <a href="?id=${sub.id}" class="sublocation-card" data-sub-id="${sub.id}">
                     <div class="sublocation-card-info">
                       <span class="badge badge-odd badge-small">場所</span>
                       <span class="sublocation-name">${sub.name || '名称未設定'}</span>
                     </div>
                     <div class="sublocation-card-action">
                       <span class="item-compact-id">#${sub.id}</span>
-                      <button class="btn-text btn-jump-sub" data-sub-id="${sub.id}">開く →</button>
+                      <span class="btn-text btn-jump-sub">開く →</span>
                     </div>
-                  </div>
+                  </a>
                 `).join('')}
               </div>
             </div>
@@ -374,7 +374,7 @@ class UIManager {
             ` : `
               <div class="item-list">
                 ${items.map(item => `
-                  <div class="item-card-compact" data-item-id="${item.id}">
+                  <a href="?id=${item.id}" class="item-card-compact" data-item-id="${item.id}">
                     <div class="item-compact-info">
                       <span class="badge badge-even badge-small">物品</span>
                       <span class="item-compact-name">${item.name || '名称未設定'}</span>
@@ -382,9 +382,9 @@ class UIManager {
                     </div>
                     <div class="item-compact-actions">
                       <span class="item-compact-id">#${item.id}</span>
-                      <button class="btn-text text-danger btn-unlink-item" data-item-page-id="${item.pageId}" data-item-name="${item.name || item.id}" title="この場所から解除">解除</button>
+                      <button type="button" class="btn-text text-danger btn-unlink-item" data-item-page-id="${item.pageId}" data-item-name="${item.name || item.id}" title="この場所から解除">解除</button>
                     </div>
-                  </div>
+                  </a>
                 `).join('')}
               </div>
             `}
