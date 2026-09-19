@@ -306,13 +306,50 @@ export class NotionClient {
       }
     }
 
+    // スキーマからプロパティのマッピングを自動検出・更新
+    const detectedMapping = { ...(state.config.propMapping || {}) };
+    try {
+      const itemSchema = await this.getDatabaseSchema(itemDbInfo.id);
+      const props = itemSchema?.properties || {};
+
+      // 1. タイトルプロパティ（物品名、名前など）
+      const foundTitle = Object.values(props).find(p => p.type === 'title');
+      if (foundTitle) detectedMapping.title = foundTitle.name;
+
+      // 2. IDプロパティ（数値、unique_id、または名前にID/番号を含むプロパティ）
+      const foundId = Object.values(props).find(p => ['id', '物品id', '場所id', '管理番号', 'no', 'コード'].includes(p.name.toLowerCase()))
+                   || Object.values(props).find(p => p.type === 'number' || p.type === 'unique_id');
+      if (foundId) detectedMapping.id = foundId.name;
+
+      // 3. リレーション（場所へのリンク）
+      const foundLocRel = Object.values(props).find(p => p.type === 'relation' && (
+        p.relation?.data_source_id?.replace(/-/g, '') === locationDbInfo.id ||
+        p.relation?.database_id?.replace(/-/g, '') === locationDbInfo.id ||
+        ['現在地', '場所', '保管場所', '収納先', '配置場所', '配置先'].includes(p.name)
+      )) || Object.values(props).find(p => p.type === 'relation');
+      if (foundLocRel) detectedMapping.location = foundLocRel.name;
+
+      // 4. 状態プロパティ
+      const foundStatus = Object.values(props).find(p => ['状態', 'ステータス', 'status'].includes(p.name.toLowerCase()) && (p.type === 'status' || p.type === 'select'))
+                       || Object.values(props).find(p => p.type === 'status');
+      if (foundStatus) detectedMapping.status = foundStatus.name;
+
+      // 5. メモプロパティ
+      const foundNotes = Object.values(props).find(p => ['メモ', '備考', '説明', '詳細'].includes(p.name) && p.type === 'rich_text')
+                      || Object.values(props).find(p => p.type === 'rich_text' && p.name !== detectedMapping.id);
+      if (foundNotes) detectedMapping.notes = foundNotes.name;
+    } catch (e) {
+      console.warn('[NotionClient] プロパティ自動解析スキップ:', e);
+    }
+
     // stateに保存
     state.saveConfig({
       dbId: cleanTargetId,
       itemDbId: itemDbInfo.id,
       locationDbId: locationDbInfo.id,
       itemDbTitle: itemDbInfo.title,
-      locationDbTitle: locationDbInfo.title
+      locationDbTitle: locationDbInfo.title,
+      propMapping: detectedMapping
     });
 
     return {
@@ -660,12 +697,20 @@ export class NotionClient {
 
     if (idVal == null) {
       for (const [key, p] of Object.entries(props)) {
-        if (key.toLowerCase() === 'id' || key === '管理番号' || key === '物品id' || key === '場所id') {
+        if (key.toLowerCase() === 'id' || key === '管理番号' || key === '物品id' || key === '場所id' || key === 'no' || key === 'コード') {
           if (p.type === 'number') idVal = p.number;
           else if (p.type === 'unique_id') idVal = p.unique_id?.number;
           else if (p.type === 'rich_text') idVal = p.rich_text?.[0]?.plain_text;
           break;
         }
+      }
+    }
+
+    // どのキーにも一致しない場合、任意のnumber型プロパティをID候補とする
+    if (idVal == null) {
+      const anyNum = Object.values(props).find(p => p.type === 'number' || p.type === 'unique_id');
+      if (anyNum) {
+        idVal = anyNum.type === 'number' ? anyNum.number : anyNum.unique_id?.number;
       }
     }
 
@@ -675,9 +720,14 @@ export class NotionClient {
       titleVal = titleProp.title.map(t => t.plain_text).join('');
     }
 
+    // タイトルが数字のみでIDが未特定の場合、タイトルをIDとして解釈
+    if (idVal == null && /^\d+$/.test(titleVal.trim())) {
+      idVal = Number(titleVal.trim());
+    }
+
     let locationRelation = [];
     const locProp = props[propMapping.location]
-      || Object.values(props).find(p => p.type === 'relation' && ['現在地', '場所', '保管場所', '収納先'].includes(p.name))
+      || Object.values(props).find(p => p.type === 'relation' && ['現在地', '場所', '保管場所', '収納先', '配置場所', '配置先'].includes(p.name))
       || Object.values(props).find(p => p.type === 'relation');
     if (locProp && locProp.type === 'relation') {
       locationRelation = locProp.relation || [];
