@@ -36,9 +36,9 @@ export async function onRequest(context) {
     }
   }
 
-  // Notion API バージョンが未指定ならデフォルト設定
+  // Notion API バージョンが未指定ならデフォルト設定 (2025-09-03: マルチデータソースDB対応)
   if (!newHeaders.has("notion-version")) {
-    newHeaders.set("notion-version", "2022-06-28");
+    newHeaders.set("notion-version", "2025-09-03");
   }
 
   try {
