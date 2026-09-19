@@ -13,6 +13,49 @@ export class NotionClient {
   }
 
   /**
+   * NotionのURLまたは生のID文字列から正規の32桁データベースIDを抽出
+   * 
+   * 例:
+   *  - https://app.notion.com/p/kuronos/3dc5e314fd47802eb00af61c71937780?v=3dc5e314fd47808f93c4000c6f793e02
+   *  - https://www.notion.so/My-DB-3dc5e314fd47802eb00af61c71937780?v=...
+   *  - 3dc5e314-fd47-802e-b00a-f61c71937780
+   *  - 3dc5e314fd47802eb00af61c71937780
+   */
+  static extractDatabaseId(input) {
+    if (!input) return '';
+    const str = String(input).trim();
+
+    // 1. URL形式の場合
+    try {
+      const url = new URL(str);
+      const segments = url.pathname.split('/').filter(Boolean);
+      if (segments.length > 0) {
+        const lastSegment = segments[segments.length - 1];
+        // パス末尾の32桁Hex (slug-32hex または 32hex単体) を優先抽出
+        const pathMatch = lastSegment.match(/([0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/);
+        if (pathMatch) {
+          return pathMatch[1].replace(/-/g, '');
+        }
+      }
+      // パスから取れず、?v= がある場合はそれを拾う
+      const vParam = url.searchParams.get('v');
+      if (vParam && /^[0-9a-fA-F]{32}$/.test(vParam)) {
+        return vParam;
+      }
+    } catch {
+      // URLでなければ文字列から正規表現検索
+    }
+
+    // 2. 文字列中に含まれる最初の32桁Hex (UUID)
+    const match = str.match(/([0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12})/);
+    if (match) {
+      return match[1].replace(/-/g, '');
+    }
+
+    return str.replace(/-/g, '');
+  }
+
+  /**
    * 現在の設定に基づきプロキシまたは直通URLを構築
    */
   _buildUrl(endpoint) {
@@ -44,7 +87,7 @@ export class NotionClient {
       return `/api/${cleanEndpoint}`;
     }
 
-    // 2. それ以外（GitHub Pages や ローカル環境等）は corsproxy.io をフォールバック利用
+    // 2. それ以外（GitHub Pages や workers.dev、ローカル環境等）は corsproxy.io をフォールバック利用
     return `https://corsproxy.io/?url=${encodeURIComponent(notionDirectUrl)}`;
   }
 
@@ -74,7 +117,10 @@ export class NotionClient {
 
       if (!res.ok) {
         const msg = data?.message || data?.error || `HTTP ${res.status} ${res.statusText}`;
-        throw new Error(msg);
+        const err = new Error(msg);
+        err.status = res.status;
+        err.code = data?.code;
+        throw err;
       }
 
       return data;
@@ -82,7 +128,7 @@ export class NotionClient {
       console.error('[NotionClient] Error requesting:', endpoint, err);
       // CORSブロック時の分かりやすい警告メッセージ付加
       if (err.message.includes('Failed to fetch') || err.name === 'TypeError') {
-        throw new Error(`Notion APIへの通信に失敗しました (CORSまたはネットワーク障害)。設定画面でプロキシ設定を確認してください。`);
+        throw new Error(`Notion APIへの通信に失敗しました (CORSまたはネットワーク障害)。設定画面でプロキシ設定を「CORS Proxy」に変更してください。`);
       }
       throw err;
     }
@@ -90,44 +136,87 @@ export class NotionClient {
 
   /**
    * データベース疎通テストおよびスキーマ情報の取得
+   * (URLやView IDが入力された場合にも自動で子データベースを探索する耐障害性機能つき)
    */
   async testConnection() {
-    const { dbId } = state.config;
-    if (!dbId) throw new Error('データベースIDが設定されていません。');
-    const cleanDbId = dbId.replace(/-/g, '');
-    const data = await this._request(`databases/${cleanDbId}`, { method: 'GET' });
-    return {
-      id: data.id,
-      title: data.title?.[0]?.plain_text || '名称未設定',
-      properties: Object.keys(data.properties || {})
-    };
+    const rawInput = state.config.dbId;
+    if (!rawInput) throw new Error('データベースのURLまたはIDが設定されていません。');
+
+    // URLまたは文字列からIDを抽出
+    let targetId = NotionClient.extractDatabaseId(rawInput);
+
+    // 1. まず抽出したIDでデータベース取得を試みる
+    try {
+      const data = await this._request(`databases/${targetId}`, { method: 'GET' });
+      return {
+        id: data.id,
+        title: data.title?.[0]?.plain_text || '名称未設定',
+        properties: Object.keys(data.properties || {})
+      };
+    } catch (err) {
+      // 404の場合、URLに含まれる ?v= (ビューID) や親ページ側の子DBを探す
+      if (err.status === 404 || err.message.includes('404')) {
+        // パスがURLだった場合、?v= パラメータも試す
+        try {
+          const url = new URL(rawInput);
+          const vParam = url.searchParams.get('v');
+          if (vParam && vParam !== targetId) {
+            const vData = await this._request(`databases/${vParam}`, { method: 'GET' });
+            // 成功した場合はstateを正しいIDに更新
+            state.saveConfig({ dbId: vParam });
+            return {
+              id: vData.id,
+              title: vData.title?.[0]?.plain_text || '名称未設定',
+              properties: Object.keys(vData.properties || {})
+            };
+          }
+        } catch {}
+
+        // 親ページとして子データベースブロックが存在しないか探索
+        try {
+          const blocks = await this._request(`blocks/${targetId}/children`, { method: 'GET' });
+          const childDb = blocks.results?.find(b => b.type === 'child_database');
+          if (childDb) {
+            const dbData = await this._request(`databases/${childDb.id}`, { method: 'GET' });
+            state.saveConfig({ dbId: childDb.id.replace(/-/g, '') });
+            return {
+              id: dbData.id,
+              title: dbData.title?.[0]?.plain_text || childDb.child_database?.title || 'インラインデータベース',
+              properties: Object.keys(dbData.properties || {})
+            };
+          }
+        } catch {}
+
+        throw new Error(`データベースが見つかりません (HTTP 404)。Notionのデータベース画面で「…」メニューからインテグレーション（コネクト）を追加・共有しているか確認してください。`);
+      }
+      throw err;
+    }
   }
 
   /**
    * 数字IDからレコードを検索 (物品または場所)
    */
   async findRecordById(numericId) {
-    const { dbId, propMapping } = state.config;
-    if (!dbId) throw new Error('データベースIDが未設定です。');
-    const cleanDbId = dbId.replace(/-/g, '');
+    const rawInput = state.config.dbId;
+    if (!rawInput) throw new Error('データベースのURLまたはIDが未設定です。');
+    const cleanDbId = NotionClient.extractDatabaseId(rawInput);
 
     const idNum = Number(numericId);
     const idStr = String(numericId);
 
-    // 数値プロパティまたはタイトル/リッチテキストの両方に対応するクエリフィルタ
     const body = {
       filter: {
         or: [
           {
-            property: propMapping.id,
+            property: state.config.propMapping.id,
             number: { equals: idNum }
           },
           {
-            property: propMapping.id,
+            property: state.config.propMapping.id,
             rich_text: { equals: idStr }
           },
           {
-            property: propMapping.title,
+            property: state.config.propMapping.title,
             title: { equals: idStr }
           }
         ]
@@ -151,12 +240,12 @@ export class NotionClient {
    * 指定した場所 (pageId) に現在置かれている物品一覧を取得
    */
   async queryItemsByLocation(locationPageId) {
-    const { dbId, propMapping } = state.config;
-    const cleanDbId = dbId.replace(/-/g, '');
+    const rawInput = state.config.dbId;
+    const cleanDbId = NotionClient.extractDatabaseId(rawInput);
 
     const body = {
       filter: {
-        property: propMapping.location,
+        property: state.config.propMapping.location,
         relation: {
           contains: locationPageId
         }
@@ -174,8 +263,6 @@ export class NotionClient {
 
   /**
    * 物品の現在地（リレーション）を更新
-   * @param {string} itemPageId - 更新する物品ページのID
-   * @param {string|null} locationPageId - 移動先の場所ページID (nullの場合は解除)
    */
   async updateItemLocation(itemPageId, locationPageId) {
     const { propMapping } = state.config;
@@ -198,31 +285,29 @@ export class NotionClient {
    * 新しい物品または場所レコードを作成
    */
   async createRecord({ numericId, name, isItem, locationPageId = null }) {
-    const { dbId, propMapping } = state.config;
-    const cleanDbId = dbId.replace(/-/g, '');
+    const rawInput = state.config.dbId;
+    const cleanDbId = NotionClient.extractDatabaseId(rawInput);
 
     const idNum = Number(numericId);
     const properties = {
-      [propMapping.title]: {
+      [state.config.propMapping.title]: {
         title: [
           { text: { content: name || `${isItem ? '物品' : '場所'} ${numericId}` } }
         ]
       },
-      [propMapping.id]: {
+      [state.config.propMapping.id]: {
         number: idNum
       }
     };
 
-    // 種別プロパティがある場合
-    if (propMapping.type) {
-      properties[propMapping.type] = {
+    if (state.config.propMapping.type) {
+      properties[state.config.propMapping.type] = {
         select: { name: isItem ? '物品' : '場所' }
       };
     }
 
-    // 物品かつ場所指定がある場合
-    if (isItem && locationPageId && propMapping.location) {
-      properties[propMapping.location] = {
+    if (isItem && locationPageId && state.config.propMapping.location) {
+      properties[state.config.propMapping.location] = {
         relation: [{ id: locationPageId }]
       };
     }
@@ -239,13 +324,12 @@ export class NotionClient {
   }
 
   /**
-   * Notionのネストされたプロパティをプレーンなオブジェクトに正規化
+   * Notionのネストされたプロパティを正規化
    */
   _normalizeRecord(page) {
     const { propMapping } = state.config;
     const props = page.properties || {};
 
-    // ID取得
     let idVal = null;
     const idProp = props[propMapping.id];
     if (idProp) {
@@ -254,21 +338,18 @@ export class NotionClient {
       else if (idProp.type === 'title') idVal = idProp.title?.[0]?.plain_text;
     }
 
-    // タイトル (名前)
     let titleVal = '';
     const titleProp = props[propMapping.title];
     if (titleProp && titleProp.title) {
       titleVal = titleProp.title.map(t => t.plain_text).join('');
     }
 
-    // 現在地 (リレーション)
     let locationRelation = [];
     const locProp = props[propMapping.location];
     if (locProp && locProp.type === 'relation') {
       locationRelation = locProp.relation || [];
     }
 
-    // 状態
     let statusVal = '';
     const statusProp = props[propMapping.status];
     if (statusProp) {
@@ -276,7 +357,6 @@ export class NotionClient {
       else if (statusProp.type === 'select') statusVal = statusProp.select?.name || '';
     }
 
-    // メモ
     let notesVal = '';
     const notesProp = props[propMapping.notes];
     if (notesProp && notesProp.type === 'rich_text') {

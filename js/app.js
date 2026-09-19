@@ -82,6 +82,23 @@ class Application {
       ui._updateProxyInputVisibility();
     });
 
+    // データベースURL/ID入力時のリアルタイム抽出表示
+    document.getElementById('input-db-id')?.addEventListener('input', (e) => {
+      const val = e.target.value.trim();
+      const detectedEl = document.getElementById('detected-db-id');
+      if (!detectedEl) return;
+      if (val) {
+        const extracted = notion.constructor.extractDatabaseId(val);
+        if (extracted) {
+          detectedEl.innerHTML = `✓ 検出されたID: <code style="color:var(--color-item);">${extracted}</code>`;
+        } else {
+          detectedEl.textContent = '有効な32桁のIDまたはNotion URLを入力してください。';
+        }
+      } else {
+        detectedEl.textContent = 'NotionのURLをそのまま貼り付けても自動抽出されます。';
+      }
+    });
+
     document.getElementById('btn-generate-setup-qr')?.addEventListener('click', () => {
       this._generateSetupQr();
     });
@@ -528,6 +545,12 @@ class Application {
       statusEl.textContent = `接続成功: データベース「${info.title}」を確認しました。`;
       statusEl.className = 'status-text text-success';
       feedback.playSuccess();
+
+      const detectedEl = document.getElementById('detected-db-id');
+      if (detectedEl && info.id) {
+        const clean = info.id.replace(/-/g, '');
+        detectedEl.innerHTML = `✓ 接続中のID: <code style="color:var(--color-item);">${clean}</code>`;
+      }
     } catch (err) {
       statusEl.textContent = `接続失敗: ${err.message}`;
       statusEl.className = 'status-text text-danger';
