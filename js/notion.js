@@ -844,6 +844,7 @@ export class NotionClient {
     const idProp = props[propMapping.id];
     if (idProp) {
       if (idProp.type === 'number') idVal = idProp.number;
+      else if (idProp.type === 'formula') idVal = idProp.formula?.number != null ? idProp.formula.number : idProp.formula?.string;
       else if (idProp.type === 'unique_id') idVal = idProp.unique_id?.number;
       else if (idProp.type === 'rich_text') idVal = idProp.rich_text?.[0]?.plain_text;
       else if (idProp.type === 'title') idVal = idProp.title?.[0]?.plain_text;
@@ -853,6 +854,7 @@ export class NotionClient {
       for (const [key, p] of Object.entries(props)) {
         if (key.toLowerCase() === 'id' || key === '管理番号' || key === '物品id' || key === '場所id' || key === 'no' || key === 'コード') {
           if (p.type === 'number') idVal = p.number;
+          else if (p.type === 'formula') idVal = p.formula?.number != null ? p.formula.number : p.formula?.string;
           else if (p.type === 'unique_id') idVal = p.unique_id?.number;
           else if (p.type === 'rich_text') idVal = p.rich_text?.[0]?.plain_text;
           break;
