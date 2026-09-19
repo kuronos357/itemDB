@@ -10,7 +10,7 @@ import { state } from './state.js';
 export class NotionClient {
   constructor() {
     this.version = '2022-06-28';
-    this._schemaCache = null;
+    this._schemaCache = {};
   }
 
   /**
@@ -138,116 +138,188 @@ export class NotionClient {
   /**
    * データベースのスキーマ（プロパティ定義一覧）を取得・キャッシュ
    */
-  async getDatabaseSchema(forceRefresh = false) {
-    const rawInput = state.config.dbId;
+  async getDatabaseSchema(dbId = null, forceRefresh = false) {
+    const rawInput = dbId || state.config.itemDbId || state.config.dbId;
     if (!rawInput) throw new Error('データベースのURLまたはIDが未設定です。');
     const cleanDbId = NotionClient.extractDatabaseId(rawInput);
 
-    if (!forceRefresh && this._schemaCache && this._schemaCache.id === cleanDbId) {
-      return this._schemaCache;
+    if (!forceRefresh && this._schemaCache[cleanDbId]) {
+      return this._schemaCache[cleanDbId];
     }
 
     const data = await this._request(`databases/${cleanDbId}`, { method: 'GET' });
-    this._schemaCache = {
+    const schema = {
       id: cleanDbId,
       title: data.title?.[0]?.plain_text || '名称未設定',
       properties: data.properties || {}
     };
-    return this._schemaCache;
+    this._schemaCache[cleanDbId] = schema;
+    return schema;
   }
 
   /**
-   * データベース疎通テストおよびスキーマ情報の取得
-   * (URLやView IDが入力された場合にも自動で子データベースを探索する耐障害性機能つき)
+   * 単一のURL/ID入力から、リレーション定義を解析して物品DBと場所DBを自動判別
    */
-  async testConnection() {
-    const rawInput = state.config.dbId;
-    if (!rawInput) throw new Error('データベースのURLまたはIDが設定されていません。');
+  async resolveDatabases(inputRaw) {
+    if (!inputRaw) throw new Error('データベースのURLまたはIDが入力されていません。');
+    let targetId = NotionClient.extractDatabaseId(inputRaw);
 
-    // URLまたは文字列からIDを抽出
-    let targetId = NotionClient.extractDatabaseId(rawInput);
-
-    // 1. まず抽出したIDでデータベース取得を試みる
+    // 1. 指定されたDBの情報を取得
+    let dbData = null;
     try {
-      const data = await this._request(`databases/${targetId}`, { method: 'GET' });
-      this._schemaCache = {
-        id: data.id,
-        title: data.title?.[0]?.plain_text || '名称未設定',
-        properties: data.properties || {}
-      };
-      return {
-        id: data.id,
-        title: this._schemaCache.title,
-        properties: Object.keys(data.properties || {})
-      };
+      dbData = await this._request(`databases/${targetId}`, { method: 'GET' });
     } catch (err) {
       // 404の場合、URLに含まれる ?v= (ビューID) や親ページ側の子DBを探す
-      if (err.status === 404 || err.message.includes('404')) {
-        // パスがURLだった場合、?v= パラメータも試す
+      if (err.status === 404 || err.message?.includes('404')) {
         try {
-          const url = new URL(rawInput);
+          const url = new URL(inputRaw);
           const vParam = url.searchParams.get('v');
           if (vParam && vParam !== targetId) {
-            const vData = await this._request(`databases/${vParam}`, { method: 'GET' });
-            // 成功した場合はstateを正しいIDに更新
-            state.saveConfig({ dbId: vParam });
-            this._schemaCache = {
-              id: vData.id,
-              title: vData.title?.[0]?.plain_text || '名称未設定',
-              properties: vData.properties || {}
-            };
-            return {
-              id: vData.id,
-              title: this._schemaCache.title,
-              properties: Object.keys(vData.properties || {})
-            };
+            dbData = await this._request(`databases/${vParam}`, { method: 'GET' });
+            targetId = vParam;
           }
         } catch {}
 
-        // 親ページとして子データベースブロックが存在しないか探索
-        try {
-          const blocks = await this._request(`blocks/${targetId}/children`, { method: 'GET' });
-          const childDb = blocks.results?.find(b => b.type === 'child_database');
-          if (childDb) {
-            const dbData = await this._request(`databases/${childDb.id}`, { method: 'GET' });
-            const cleanChildId = childDb.id.replace(/-/g, '');
-            state.saveConfig({ dbId: cleanChildId });
-            this._schemaCache = {
-              id: dbData.id,
-              title: dbData.title?.[0]?.plain_text || childDb.child_database?.title || 'インラインデータベース',
-              properties: dbData.properties || {}
-            };
-            return {
-              id: dbData.id,
-              title: this._schemaCache.title,
-              properties: Object.keys(dbData.properties || {})
-            };
-          }
-        } catch {}
-
-        throw new Error(`データベースが見つかりません (HTTP 404)。Notionのデータベース画面で「…」メニューからインテグレーション（コネクト）を追加・共有しているか確認してください。`);
+        if (!dbData) {
+          try {
+            const blocks = await this._request(`blocks/${targetId}/children`, { method: 'GET' });
+            const childDb = blocks.results?.find(b => b.type === 'child_database');
+            if (childDb) {
+              dbData = await this._request(`databases/${childDb.id}`, { method: 'GET' });
+              targetId = childDb.id.replace(/-/g, '');
+            }
+          } catch {}
+        }
       }
-      throw err;
+      if (!dbData) throw err;
     }
+
+    const cleanTargetId = targetId.replace(/-/g, '');
+    const titleA = dbData.title?.[0]?.plain_text || 'データベース';
+    this._schemaCache[cleanTargetId] = {
+      id: cleanTargetId,
+      title: titleA,
+      properties: dbData.properties || {}
+    };
+
+    // 2. リレーションプロパティを探索
+    const props = dbData.properties || {};
+    const relationProps = Object.values(props).filter(p => p.type === 'relation' && p.relation?.database_id);
+
+    let itemDbInfo = null;
+    let locationDbInfo = null;
+
+    if (relationProps.length > 0) {
+      // 関連するリレーションプロパティを選択
+      const relProp = relationProps.find(p => ['現在地', '場所', '保管場所', '収納先'].includes(p.name))
+        || relationProps.find(p => ['収容物', '物品', 'アイテム'].includes(p.name))
+        || relationProps[0];
+
+      const relatedDbId = relProp.relation.database_id.replace(/-/g, '');
+      let titleB = '関連データベース';
+      try {
+        const relatedDbData = await this._request(`databases/${relatedDbId}`, { method: 'GET' });
+        titleB = relatedDbData.title?.[0]?.plain_text || titleB;
+        this._schemaCache[relatedDbId] = {
+          id: relatedDbId,
+          title: titleB,
+          properties: relatedDbData.properties || {}
+        };
+      } catch (e) {
+        console.warn('[NotionClient] リレーション先DBの取得に失敗:', e.message);
+      }
+
+      // どちらが物品DBでどちらが場所DBかを判定
+      const lowerA = titleA.toLowerCase();
+      const isAItem = /物|アイテム|item|ツール|tool|パーツ|part/.test(lowerA) ||
+                      ['現在地', '場所', '保管場所', '収納先'].includes(relProp.name);
+      const isALocation = /場|ロケーション|location|収納|棚|部屋|ボックス|box/.test(lowerA) ||
+                          ['収容物', '物品', 'アイテム'].includes(relProp.name);
+
+      if (isAItem && !isALocation) {
+        itemDbInfo = { id: cleanTargetId, title: titleA };
+        locationDbInfo = { id: relatedDbId, title: titleB };
+      } else if (isALocation && !isAItem) {
+        locationDbInfo = { id: cleanTargetId, title: titleA };
+        itemDbInfo = { id: relatedDbId, title: titleB };
+      } else {
+        // デフォルト: 入力された方を物品DB、リンク先を場所DBとする
+        itemDbInfo = { id: cleanTargetId, title: titleA };
+        locationDbInfo = { id: relatedDbId, title: titleB };
+      }
+    } else {
+      // リレーションがない場合は単一DBとして運用
+      itemDbInfo = { id: cleanTargetId, title: titleA };
+      locationDbInfo = { id: cleanTargetId, title: titleA };
+    }
+
+    // stateに保存
+    state.saveConfig({
+      dbId: cleanTargetId,
+      itemDbId: itemDbInfo.id,
+      locationDbId: locationDbInfo.id,
+      itemDbTitle: itemDbInfo.title,
+      locationDbTitle: locationDbInfo.title
+    });
+
+    return {
+      itemDb: itemDbInfo,
+      locationDb: locationDbInfo,
+      isDual: itemDbInfo.id !== locationDbInfo.id
+    };
   }
 
   /**
-   * 数字IDからレコードを検索 (物品または場所)
-   * Notionのデータベースプロパティ型（number / rich_text / unique_id / title）を判別し
-   * 厳密かつ正確なフィルターで検索します。
+   * データベース疎通テスト（2つのDBの連携状況を診断）
    */
-  async findRecordById(numericId) {
-    const rawInput = state.config.dbId;
-    if (!rawInput) throw new Error('データベースのURLまたはIDが未設定です。');
-    const cleanDbId = NotionClient.extractDatabaseId(rawInput);
+  async testConnection() {
+    const rawInput = state.config.dbId || state.config.itemDbId || state.config.locationDbId;
+    if (!rawInput) throw new Error('データベースのURLまたはIDが設定されていません。');
 
+    return await this.resolveDatabases(rawInput);
+  }
+
+  /**
+   * 数字IDからレコードを検索 (偶数=物品DB, 奇数=場所DB)
+   */
+  async findRecordById(numericId, isItem = null) {
+    if (isItem === null) {
+      isItem = (Number(numericId) % 2 === 0);
+    }
+
+    const primaryDbId = isItem
+      ? (state.config.itemDbId || state.config.dbId)
+      : (state.config.locationDbId || state.config.dbId);
+
+    if (!primaryDbId) throw new Error('データベースのURLまたはIDが未設定です。');
+
+    // 1. 本来の対象DBで検索
+    let record = await this._queryDbForId(primaryDbId, numericId);
+    if (record) return record;
+
+    // 2. もし見つからず、2DB構成の場合はもう片方のDBもフォールバック検索
+    const secondaryDbId = isItem
+      ? state.config.locationDbId
+      : state.config.itemDbId;
+
+    if (secondaryDbId && secondaryDbId !== primaryDbId) {
+      record = await this._queryDbForId(secondaryDbId, numericId);
+      if (record) return record;
+    }
+
+    return null;
+  }
+
+  /**
+   * 指定DBに対して型安全な単一ID検索を実行
+   */
+  async _queryDbForId(cleanDbId, numericId) {
     const idNum = Number(numericId);
     const idStr = String(numericId);
 
-    // データベーススキーマを取得
     let schema = null;
     try {
-      schema = await this.getDatabaseSchema();
+      schema = await this.getDatabaseSchema(cleanDbId);
     } catch (e) {
       console.warn('[NotionClient] スキーマ取得スキップ (フォールバック使用):', e.message);
     }
@@ -255,7 +327,6 @@ export class NotionClient {
     const props = schema?.properties || {};
     const configuredIdPropName = state.config.propMapping.id || 'ID';
 
-    // プロパティ特定 (完全一致 -> 大文字小文字無視 -> 候補名 -> number/unique_id型)
     let matchedProp = props[configuredIdPropName];
     let actualPropName = configuredIdPropName;
 
@@ -274,24 +345,15 @@ export class NotionClient {
     let propType = matchedProp?.type || 'number';
 
     const buildFilter = (name, type) => {
-      if (type === 'number') {
-        return { property: name, number: { equals: idNum } };
-      }
-      if (type === 'unique_id') {
-        return { property: name, unique_id: { equals: idNum } };
-      }
-      if (type === 'rich_text' || type === 'text') {
-        return { property: name, rich_text: { equals: idStr } };
-      }
-      if (type === 'title') {
-        return { property: name, title: { equals: idStr } };
-      }
+      if (type === 'number') return { property: name, number: { equals: idNum } };
+      if (type === 'unique_id') return { property: name, unique_id: { equals: idNum } };
+      if (type === 'rich_text' || type === 'text') return { property: name, rich_text: { equals: idStr } };
+      if (type === 'title') return { property: name, title: { equals: idStr } };
       return { property: name, number: { equals: idNum } };
     };
 
     let queryFilter = buildFilter(actualPropName, propType);
 
-    // クエリ実行（型不一致エラー発生時の自己修復機能付き）
     let res = null;
     try {
       res = await this._request(`databases/${cleanDbId}/query`, {
@@ -299,8 +361,6 @@ export class NotionClient {
         body: JSON.stringify({ filter: queryFilter, page_size: 1 })
       });
     } catch (err) {
-      // 例: "database property number does not match filter text"
-      // または "database property rich_text does not match filter number"
       const match = err.message && err.message.match(/database property (\w+) does not match filter (\w+)/i);
       if (match) {
         const correctType = match[1].toLowerCase();
@@ -319,7 +379,7 @@ export class NotionClient {
       return this._normalizeRecord(res.results[0]);
     }
 
-    // もしIDプロパティで見つからず、タイトルプロパティが別にあればタイトル検索も試みる
+    // タイトル検索フォールバック
     const titleProp = Object.values(props).find(p => p.type === 'title');
     if (titleProp && titleProp.name !== actualPropName) {
       try {
@@ -333,24 +393,32 @@ export class NotionClient {
         if (titleRes?.results && titleRes.results.length > 0) {
           return this._normalizeRecord(titleRes.results[0]);
         }
-      } catch {
-        // タイトル検索の例外は無視
-      }
+      } catch {}
     }
 
     return null;
   }
 
   /**
-   * 指定した場所 (pageId) に現在置かれている物品一覧を取得
+   * 単一ページ（Page）の取得
+   */
+  async fetchPage(pageId) {
+    if (!pageId) return null;
+    const cleanId = pageId.replace(/-/g, '');
+    const data = await this._request(`pages/${cleanId}`, { method: 'GET' });
+    return this._normalizeRecord(data);
+  }
+
+  /**
+   * 指定した場所 (pageId) に現在置かれている物品一覧を取得 (物品DBをクエリ)
    */
   async queryItemsByLocation(locationPageId) {
-    const rawInput = state.config.dbId;
-    const cleanDbId = NotionClient.extractDatabaseId(rawInput);
+    const itemDbId = state.config.itemDbId || state.config.dbId;
+    if (!itemDbId) return [];
 
     let locPropName = state.config.propMapping.location || '現在地';
     try {
-      const schema = await this.getDatabaseSchema();
+      const schema = await this.getDatabaseSchema(itemDbId);
       const props = schema?.properties || {};
       if (!props[locPropName] || props[locPropName].type !== 'relation') {
         const foundRel = Object.values(props).find(p => p.type === 'relation');
@@ -368,7 +436,7 @@ export class NotionClient {
       page_size: 100
     };
 
-    const res = await this._request(`databases/${cleanDbId}/query`, {
+    const res = await this._request(`databases/${itemDbId}/query`, {
       method: 'POST',
       body: JSON.stringify(body)
     });
@@ -377,12 +445,13 @@ export class NotionClient {
   }
 
   /**
-   * 物品の現在地（リレーション）を更新
+   * 物品の現在地（リレーション）を更新 (物品DBのページをPATCH)
    */
   async updateItemLocation(itemPageId, locationPageId) {
+    const itemDbId = state.config.itemDbId || state.config.dbId;
     let locPropName = state.config.propMapping.location || '現在地';
     try {
-      const schema = await this.getDatabaseSchema();
+      const schema = await this.getDatabaseSchema(itemDbId);
       const props = schema?.properties || {};
       if (!props[locPropName] || props[locPropName].type !== 'relation') {
         const foundRel = Object.values(props).find(p => p.type === 'relation');
@@ -405,18 +474,21 @@ export class NotionClient {
   }
 
   /**
-   * 新しい物品または場所レコードを作成
+   * 新しい物品または場所レコードを作成 (適切なDBへルーティング)
    */
   async createRecord({ numericId, name, isItem, locationPageId = null }) {
-    const rawInput = state.config.dbId;
-    const cleanDbId = NotionClient.extractDatabaseId(rawInput);
+    const targetDbId = isItem
+      ? (state.config.itemDbId || state.config.dbId)
+      : (state.config.locationDbId || state.config.dbId);
+
+    if (!targetDbId) throw new Error('作成先データベースが未設定です。');
 
     const idNum = Number(numericId);
     const idStr = String(numericId);
 
     let schema = null;
     try {
-      schema = await this.getDatabaseSchema();
+      schema = await this.getDatabaseSchema(targetDbId);
     } catch {}
     const props = schema?.properties || {};
 
@@ -466,7 +538,7 @@ export class NotionClient {
       }
     }
 
-    // 4. 現在地 (Location) プロパティが存在する場合のみ設定
+    // 4. 現在地 (Location) プロパティが存在する場合のみ設定（物品のみ）
     if (isItem && locationPageId) {
       let locPropName = state.config.propMapping.location || '現在地';
       const foundLoc = props[locPropName] || Object.values(props).find(p => p.type === 'relation');
@@ -480,7 +552,7 @@ export class NotionClient {
     const res = await this._request(`pages`, {
       method: 'POST',
       body: JSON.stringify({
-        parent: { database_id: cleanDbId },
+        parent: { database_id: targetDbId },
         properties
       })
     });
@@ -522,7 +594,9 @@ export class NotionClient {
     }
 
     let locationRelation = [];
-    const locProp = props[propMapping.location] || Object.values(props).find(p => p.type === 'relation');
+    const locProp = props[propMapping.location]
+      || Object.values(props).find(p => p.type === 'relation' && ['現在地', '場所', '保管場所', '収納先'].includes(p.name))
+      || Object.values(props).find(p => p.type === 'relation');
     if (locProp && locProp.type === 'relation') {
       locationRelation = locProp.relation || [];
     }

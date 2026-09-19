@@ -16,6 +16,8 @@ export const AppMode = {
 const STORAGE_KEYS = {
   NOTION_API_KEY: 'itemdb_notion_api_key',
   NOTION_DB_ID: 'itemdb_notion_db_id',
+  NOTION_ITEM_DB_ID: 'itemdb_notion_item_db_id',
+  NOTION_LOCATION_DB_ID: 'itemdb_notion_location_db_id',
   NOTION_PROXY_MODE: 'itemdb_notion_proxy_mode', // 'auto', 'cloudflare', 'corsproxy', 'direct', 'custom'
   CUSTOM_PROXY_URL: 'itemdb_custom_proxy_url',
   PROP_MAPPING: 'itemdb_prop_mapping',
@@ -37,6 +39,10 @@ class StateStore extends EventTarget {
     this.config = {
       apiKey: localStorage.getItem(STORAGE_KEYS.NOTION_API_KEY) || '',
       dbId: localStorage.getItem(STORAGE_KEYS.NOTION_DB_ID) || '',
+      itemDbId: localStorage.getItem(STORAGE_KEYS.NOTION_ITEM_DB_ID) || '',
+      locationDbId: localStorage.getItem(STORAGE_KEYS.NOTION_LOCATION_DB_ID) || '',
+      itemDbTitle: '',
+      locationDbTitle: '',
       proxyMode: localStorage.getItem(STORAGE_KEYS.NOTION_PROXY_MODE) || 'auto',
       customProxyUrl: localStorage.getItem(STORAGE_KEYS.CUSTOM_PROXY_URL) || '',
       propMapping: this._loadPropMapping()
@@ -73,6 +79,8 @@ class StateStore extends EventTarget {
     this.config = { ...this.config, ...newConfig };
     if (newConfig.apiKey !== undefined) localStorage.setItem(STORAGE_KEYS.NOTION_API_KEY, newConfig.apiKey);
     if (newConfig.dbId !== undefined) localStorage.setItem(STORAGE_KEYS.NOTION_DB_ID, newConfig.dbId);
+    if (newConfig.itemDbId !== undefined) localStorage.setItem(STORAGE_KEYS.NOTION_ITEM_DB_ID, newConfig.itemDbId);
+    if (newConfig.locationDbId !== undefined) localStorage.setItem(STORAGE_KEYS.NOTION_LOCATION_DB_ID, newConfig.locationDbId);
     if (newConfig.proxyMode !== undefined) localStorage.setItem(STORAGE_KEYS.NOTION_PROXY_MODE, newConfig.proxyMode);
     if (newConfig.customProxyUrl !== undefined) localStorage.setItem(STORAGE_KEYS.CUSTOM_PROXY_URL, newConfig.customProxyUrl);
     if (newConfig.propMapping !== undefined) {
@@ -82,7 +90,7 @@ class StateStore extends EventTarget {
   }
 
   isConfigured() {
-    return Boolean(this.config.apiKey && this.config.dbId);
+    return Boolean(this.config.apiKey && (this.config.itemDbId || this.config.locationDbId || this.config.dbId));
   }
 
   addHistory(entry) {

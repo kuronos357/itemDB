@@ -239,7 +239,11 @@ class Application {
     state.saveConfig({ dbId: dbid, apiKey: api });
     try {
       const conn = await notion.testConnection();
-      ui.showToast(`初期設定完了: 「${conn.title}」に接続しました`, 'success', 4000);
+      if (conn.isDual) {
+        ui.showToast(`初期設定完了: 物品「${conn.itemDb.title}」⇄ 場所「${conn.locationDb.title}」に接続しました`, 'success', 4500);
+      } else {
+        ui.showToast(`初期設定完了: 「${conn.itemDb.title}」に接続しました`, 'success', 4000);
+      }
       feedback.playSuccess();
     } catch (err) {
       ui.showToast(`設定を保存しましたが接続確認でエラー: ${err.message}`, 'warning', 5000);
@@ -330,7 +334,7 @@ class Application {
     ui.setLoading(true, isItem ? '物品データを取得中...' : '場所データを取得中...');
 
     try {
-      let record = await notion.findRecordById(numericStr);
+      let record = await notion.findRecordById(numericStr, isItem);
 
       // レコードが存在しない場合、新規登録を提案・作成
       if (!record) {
@@ -357,12 +361,11 @@ class Application {
 
       if (isItem) {
         state.currentItem = record;
-        // 現在地の場所レコードを取得
+        // 現在地の場所レコードを取得 (リレーションから場所ページを取得)
         state.currentLocation = null;
         if (record.locationPageIds && record.locationPageIds.length > 0) {
           try {
-            const locRes = await notion._request(`pages/${record.locationPageIds[0]}`);
-            state.currentLocation = notion._normalizeRecord(locRes);
+            state.currentLocation = await notion.fetchPage(record.locationPageIds[0]);
           } catch (e) {
             console.warn('[App] Could not fetch parent location:', e);
           }
@@ -395,7 +398,7 @@ class Application {
     ui.setLoading(true, '移動先の場所を確認中...');
 
     try {
-      let locationRecord = await notion.findRecordById(numericStr);
+      let locationRecord = await notion.findRecordById(numericStr, false);
       if (!locationRecord) {
         const ok = confirm(`場所ID #${numericStr} は未登録です。Notionに新規作成して移動しますか？`);
         if (!ok) {
@@ -457,7 +460,7 @@ class Application {
         ui.showToast(`「${itemToRemove.name}」を解除しました`, 'removed', 2500);
       } else {
         // --- まだ存在しない → 追加 (格納) ---
-        let itemToAdd = await notion.findRecordById(numericStr);
+        let itemToAdd = await notion.findRecordById(numericStr, true);
         if (!itemToAdd) {
           // 未登録物品なら作成
           itemToAdd = await notion.createRecord({
@@ -513,6 +516,10 @@ class Application {
     const customProxyUrl = document.getElementById('input-custom-proxy')?.value.trim();
 
     state.saveConfig({ apiKey, dbId, proxyMode, customProxyUrl });
+    if (apiKey && dbId) {
+      notion.resolveDatabases(dbId).catch(() => {});
+    }
+
     document.getElementById('settings-modal')?.classList.add('hidden');
     ui.showToast('設定を保存しました', 'success');
 
@@ -542,14 +549,21 @@ class Application {
 
     try {
       const info = await notion.testConnection();
-      statusEl.textContent = `接続成功: データベース「${info.title}」を確認しました。`;
+      if (info.isDual) {
+        statusEl.innerHTML = `✓ 接続成功！<br><b>物品DB</b>: 「${info.itemDb.title}」<br><b>場所DB</b>: 「${info.locationDb.title}」 (リレーション自動連携)`;
+      } else {
+        statusEl.textContent = `✓ 接続成功: データベース「${info.itemDb.title}」を確認しました。`;
+      }
       statusEl.className = 'status-text text-success';
       feedback.playSuccess();
 
       const detectedEl = document.getElementById('detected-db-id');
-      if (detectedEl && info.id) {
-        const clean = info.id.replace(/-/g, '');
-        detectedEl.innerHTML = `✓ 接続中のID: <code style="color:var(--color-item);">${clean}</code>`;
+      if (detectedEl) {
+        if (info.isDual) {
+          detectedEl.innerHTML = `✓ 物品DB: <code>${info.itemDb.id}</code><br>✓ 場所DB: <code>${info.locationDb.id}</code>`;
+        } else {
+          detectedEl.innerHTML = `✓ 接続中のID: <code>${info.itemDb.id}</code>`;
+        }
       }
     } catch (err) {
       statusEl.textContent = `接続失敗: ${err.message}`;
