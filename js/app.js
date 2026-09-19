@@ -707,13 +707,16 @@ class Application {
    */
   _generateSetupQr() {
     const { dbId, apiKey, itemDbId, locationDbId } = state.config;
-    const effectiveDbId = itemDbId || dbId;
+    const effectiveDbId = dbId || itemDbId;
     if (!effectiveDbId || !apiKey) {
       ui.showToast('先にAPIキーとデータベースIDを入力してください', 'warning');
       return;
     }
 
     let targetUrl = `${window.location.origin}${window.location.pathname}?dbid=${encodeURIComponent(effectiveDbId)}&api=${encodeURIComponent(apiKey)}`;
+    if (itemDbId && itemDbId !== effectiveDbId) {
+      targetUrl += `&itemDbId=${encodeURIComponent(itemDbId)}`;
+    }
     if (locationDbId) {
       targetUrl += `&locid=${encodeURIComponent(locationDbId)}`;
     }

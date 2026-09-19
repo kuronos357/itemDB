@@ -72,9 +72,25 @@ class StateStore extends EventTarget {
     const cleanItem = (this.config.itemDbId || '').replace(/-/g, '');
     const cleanLoc = (this.config.locationDbId || '').replace(/-/g, '');
 
-    // 既知の「目録(物品)」と「物理アドレス(場所)」が逆転している場合の自動補正
+    // 既知の「目録(物品)」と「物理アドレス(場所)」および親コンテナDBの自動補正
     const KNOWN_ITEM_DS = '3dc5e314fd47809088a5000b035baac0';
     const KNOWN_LOC_DS = '3e05e314fd4780e2a08a000b4bc0c86a';
+    const KNOWN_PARENT_DB = '3dc5e314fd47802eb00af61c71937780';
+
+    const cleanDb = (this.config.dbId || '').replace(/-/g, '');
+
+    // dbId が親コンテナではなく子データソース (目録 or 物理アドレス) になっていた場合、親DBに補正
+    if (cleanDb === KNOWN_ITEM_DS || cleanDb === KNOWN_LOC_DS) {
+      console.info('[State] dbId を親データベースIDに自動修復します');
+      updates.dbId = KNOWN_PARENT_DB;
+      if (!cleanItem) updates.itemDbId = KNOWN_ITEM_DS;
+      if (!cleanLoc) updates.locationDbId = KNOWN_LOC_DS;
+      changed = true;
+    } else if (cleanDb === KNOWN_PARENT_DB && (!cleanItem || !cleanLoc)) {
+      updates.itemDbId = KNOWN_ITEM_DS;
+      updates.locationDbId = KNOWN_LOC_DS;
+      changed = true;
+    }
 
     if (cleanItem === KNOWN_LOC_DS && cleanLoc === KNOWN_ITEM_DS) {
       console.warn('[State] 物品DBと場所DBの割り当て逆転を自動修復します');

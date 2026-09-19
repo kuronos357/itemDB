@@ -192,8 +192,30 @@ export class NotionClient {
     try {
       dbData = await this._request(`databases/${targetId}`, { method: 'GET' });
     } catch (err) {
-      // 404の場合、URLに含まれる ?v= (ビューID) や親ページ側の子DBを探す
-      if (err.status === 404 || err.message?.includes('404')) {
+      // A. targetId が data_source のIDである可能性をチェック (Notion 2025-09-03 API)
+      try {
+        const dsData = await this._request(`data_sources/${targetId}`, { method: 'GET' });
+        if (dsData?.parent?.database_id) {
+          const parentDbId = dsData.parent.database_id.replace(/-/g, '');
+          try {
+            dbData = await this._request(`databases/${parentDbId}`, { method: 'GET' });
+            targetId = parentDbId;
+          } catch {}
+        }
+        if (!dbData && dsData) {
+          dbData = {
+            id: targetId,
+            title: dsData.title || [{ plain_text: dsData.name || 'データソース' }],
+            properties: dsData.properties || {},
+            data_sources: [dsData]
+          };
+        }
+      } catch (dsErr) {
+        // data_sources でもなかった場合はフォールバックへ
+      }
+
+      // B. 404の場合、URLに含まれる ?v= (ビューID) や親ページ側の子DBを探す
+      if (!dbData && (err.status === 404 || err.message?.includes('404') || err.message?.includes('Could not find database'))) {
         try {
           const url = new URL(inputRaw);
           const vParam = url.searchParams.get('v');
@@ -396,8 +418,25 @@ export class NotionClient {
    * データベース疎通テスト（2つのDBの連携状況を診断）
    */
   async testConnection() {
-    const rawInput = state.config.dbId || state.config.itemDbId || state.config.locationDbId;
+    const itemDbId = state.config.itemDbId;
+    const locationDbId = state.config.locationDbId;
+    const rawInput = state.config.dbId || itemDbId || locationDbId;
     if (!rawInput) throw new Error('データベースのURLまたはIDが設定されていません。');
+
+    // すでに物品DBと場所DB（データソースID）の両方が設定されている場合は直接両方のスキーマを取得して確認
+    if (itemDbId && locationDbId && itemDbId !== locationDbId) {
+      try {
+        const itemSchema = await this.getDatabaseSchema(itemDbId);
+        const locSchema = await this.getDatabaseSchema(locationDbId);
+        return {
+          itemDb: { id: itemDbId, title: itemSchema.title || '物品' },
+          locationDb: { id: locationDbId, title: locSchema.title || '場所' },
+          isDual: true
+        };
+      } catch (err) {
+        console.warn('[NotionClient] Direct schema check failed, falling back to resolveDatabases:', err);
+      }
+    }
 
     return await this.resolveDatabases(rawInput);
   }
