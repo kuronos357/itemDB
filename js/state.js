@@ -28,9 +28,9 @@ const DEFAULT_PROP_MAPPING = {
   id: 'ID',
   title: '名前',
   type: '種別',
-  location: '現在地',
+  location: '物理アドレス',
   status: '状態',
-  notes: 'メモ'
+  notes: '属性'
 };
 
 class StateStore extends EventTarget {

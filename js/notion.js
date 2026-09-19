@@ -227,9 +227,42 @@ export class NotionClient {
     // 1つのデータベースコンテナに複数のデータソース（物品、場所など）が含まれている場合
     if (dbData.data_sources && dbData.data_sources.length >= 2) {
       const dsList = dbData.data_sources;
-      let itemDs = dsList.find(ds => /物|アイテム|item|ツール|tool|パーツ|part/i.test(ds.name));
-      let locDs = dsList.find(ds => /場|ロケーション|location|収納|棚|部屋|ボックス|box/i.test(ds.name));
+      let itemDs = null;
+      let locDs = null;
 
+      // 1. 各データソースのプロパティ構造による高精度判定
+      for (const ds of dsList) {
+        const cleanId = ds.id.replace(/-/g, '');
+        try {
+          const schema = await this.getDatabaseSchema(cleanId);
+          const props = schema?.properties || {};
+          // 親アイテム・サブアイテム（階層構造）を持つのは場所データソース
+          if (props['親アイテム'] || props['サブアイテム']) {
+            locDs = ds;
+          }
+          // 物理アドレスや現在地へのリレーションを持つのは物品データソース
+          if (props['物理アドレス'] || props['現在地']) {
+            itemDs = ds;
+          }
+        } catch {}
+      }
+
+      // 2. 名前による判定（目録/物品 vs 物理アドレス/場所）
+      if (!itemDs || !locDs) {
+        if (!itemDs) {
+          // 「物理アドレス」に「物」が含まれるため「目録」や「物品」などを優先一致
+          itemDs = dsList.find(ds => /^(目録|物品|アイテム|品名|ツール|tools?|items?|catalog)$/i.test(ds.name))
+                || dsList.find(ds => /目録|アイテム|item|ツール|パーツ|品名/i.test(ds.name))
+                || (locDs ? dsList.find(ds => ds.id !== locDs.id) : null);
+        }
+        if (!locDs) {
+          locDs = dsList.find(ds => /^(物理アドレス|アドレス|場所|位置|ロケーション|棚|収納)$/i.test(ds.name))
+               || dsList.find(ds => /物理アドレス|アドレス|場所|位置|収納|棚|部屋|ボックス|box|保管/i.test(ds.name))
+               || (itemDs ? dsList.find(ds => ds.id !== itemDs.id) : null);
+        }
+      }
+
+      // 3. フォールバック
       if (!itemDs && !locDs) {
         itemDs = dsList[0];
         locDs = dsList[1];
@@ -511,12 +544,18 @@ export class NotionClient {
     const itemTargetId = state.config.itemDbId || state.config.dbId;
     if (!itemTargetId) return [];
 
-    let locPropName = state.config.propMapping.location || '現在地';
+    let locPropName = state.config.propMapping.location || '物理アドレス';
     try {
       const schema = await this.getDatabaseSchema(itemTargetId);
       const props = schema?.properties || {};
       if (!props[locPropName] || props[locPropName].type !== 'relation') {
-        const foundRel = Object.values(props).find(p => p.type === 'relation');
+        const foundRel = props['物理アドレス']
+          || props['現在地']
+          || Object.values(props).find(p => p.type === 'relation' && (
+               p.relation?.data_source_id?.replace(/-/g, '') === state.config.locationDbId ||
+               p.relation?.database_id?.replace(/-/g, '') === state.config.locationDbId
+             ))
+          || Object.values(props).find(p => p.type === 'relation');
         if (foundRel) locPropName = foundRel.name;
       }
     } catch {}
@@ -552,12 +591,18 @@ export class NotionClient {
    */
   async updateItemLocation(itemPageId, locationPageId) {
     const itemTargetId = state.config.itemDbId || state.config.dbId;
-    let locPropName = state.config.propMapping.location || '現在地';
+    let locPropName = state.config.propMapping.location || '物理アドレス';
     try {
       const schema = await this.getDatabaseSchema(itemTargetId);
       const props = schema?.properties || {};
       if (!props[locPropName] || props[locPropName].type !== 'relation') {
-        const foundRel = Object.values(props).find(p => p.type === 'relation');
+        const foundRel = props['物理アドレス']
+          || props['現在地']
+          || Object.values(props).find(p => p.type === 'relation' && (
+               p.relation?.data_source_id?.replace(/-/g, '') === state.config.locationDbId ||
+               p.relation?.database_id?.replace(/-/g, '') === state.config.locationDbId
+             ))
+          || Object.values(props).find(p => p.type === 'relation');
         if (foundRel) locPropName = foundRel.name;
       }
     } catch {}
@@ -641,15 +686,28 @@ export class NotionClient {
       }
     }
 
-    // 4. 現在地 (Location) プロパティが存在する場合のみ設定（物品のみ）
+    // 4. 現在地/物理アドレス プロパティが存在する場合のみ設定（物品のみ）
     if (isItem && locationPageId) {
-      let locPropName = state.config.propMapping.location || '現在地';
-      const foundLoc = props[locPropName] || Object.values(props).find(p => p.type === 'relation');
+      let locPropName = state.config.propMapping.location || '物理アドレス';
+      const foundLoc = props[locPropName]
+        || props['物理アドレス']
+        || Object.values(props).find(p => p.type === 'relation' && (
+             p.relation?.data_source_id?.replace(/-/g, '') === state.config.locationDbId ||
+             p.relation?.database_id?.replace(/-/g, '') === state.config.locationDbId ||
+             ['物理アドレス', '現在地', '場所', '保管場所', '収納先'].includes(p.name)
+           ))
+        || Object.values(props).find(p => p.type === 'relation');
+
       if (foundLoc && foundLoc.type === 'relation') {
         properties[foundLoc.name] = {
           relation: [{ id: locationPageId }]
         };
       }
+    }
+
+    // 5. アクティブ (checkbox) が存在する場合は true に設定（物品のみ）
+    if (isItem && props['アクティブ']?.type === 'checkbox') {
+      properties['アクティブ'] = { checkbox: true };
     }
 
     // 2025-09-03 では data_source_id または database_id で親を指定
@@ -746,6 +804,22 @@ export class NotionClient {
       notesVal = notesProp.rich_text.map(t => t.plain_text).join('');
     }
 
+    // 属性 (multi_select) の抽出
+    const attrProp = props['属性'] || Object.values(props).find(p => p.type === 'multi_select');
+    const attributes = attrProp?.multi_select ? attrProp.multi_select.map(opt => opt.name) : [];
+
+    // アクティブフラグ (checkbox)
+    const activeProp = props['アクティブ'];
+    const isActive = activeProp?.type === 'checkbox' ? activeProp.checkbox : null;
+
+    if (!statusVal && isActive !== null) {
+      statusVal = isActive ? 'アクティブ' : '非アクティブ';
+    }
+
+    if (!notesVal && attributes.length > 0) {
+      notesVal = attributes.join(' / ');
+    }
+
     return {
       pageId: page.id,
       id: idVal,
@@ -753,6 +827,8 @@ export class NotionClient {
       locationPageIds: locationRelation.map(r => r.id),
       status: statusVal,
       notes: notesVal,
+      attributes,
+      isActive,
       url: page.url,
       rawProperties: props
     };

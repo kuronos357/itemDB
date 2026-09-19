@@ -202,6 +202,15 @@ class UIManager {
               </div>
             </div>
 
+            ${item.attributes && item.attributes.length > 0 ? `
+              <div class="prop-item">
+                <span class="prop-label">属性</span>
+                <div class="prop-tags">
+                  ${item.attributes.map(a => `<span class="badge badge-tag">${a}</span>`).join('')}
+                </div>
+              </div>
+            ` : ''}
+
             ${item.status ? `
               <div class="prop-item">
                 <span class="prop-label">状態</span>
@@ -209,7 +218,7 @@ class UIManager {
               </div>
             ` : ''}
 
-            ${item.notes ? `
+            ${item.notes && (!item.attributes || item.notes !== item.attributes.join(' / ')) ? `
               <div class="prop-item">
                 <span class="prop-label">メモ</span>
                 <span class="prop-value">${item.notes}</span>
@@ -293,6 +302,12 @@ class UIManager {
           </div>
 
           <h2 class="detail-title">${location.name || '名称未設定'}</h2>
+
+          ${location.attributes && location.attributes.length > 0 ? `
+            <div class="prop-tags mt-2">
+              ${location.attributes.map(a => `<span class="badge badge-tag">${a}</span>`).join('')}
+            </div>
+          ` : ''}
 
           <div class="action-buttons mt-3 mb-3">
             <button id="btn-edit-batch" class="btn btn-primary btn-large">
