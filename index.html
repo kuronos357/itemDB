@@ -2,10 +2,148 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>itemDB</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="itemDB">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="description" content="JIS X 0560準拠コンセプト 部屋の物と収納場所を情報空間で追跡する個人用物品管理システム">
+
+  <title>itemDB - 物品管理システム</title>
+
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+  <link rel="stylesheet" href="style.css">
+
+  <!-- カメラQRスキャン用ライブラリ -->
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <!-- 設定用QRコード生成ライブラリ -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
-  <h1>itemDB</h1>
-  <p>公開テスト成功</p>
+  <div class="app-container">
+    <!-- ヘッダー -->
+    <header class="app-header">
+      <div class="logo-section">
+        <h1 class="app-title">itemDB</h1>
+        <span class="app-subtitle">Logistics & Cache</span>
+      </div>
+      <div class="header-actions">
+        <button id="btn-header-home" class="icon-btn" title="スキャナ・ホーム">🏠</button>
+        <button id="btn-header-settings" class="icon-btn" title="設定">⚙️</button>
+      </div>
+    </header>
+
+    <!-- メインコンテンツ表示領域 -->
+    <main id="app-main" class="app-main">
+      <!-- UI.jsにより動的に描画されます -->
+    </main>
+  </div>
+
+  <!-- トースト通知コンテナ -->
+  <div id="toast-container"></div>
+
+  <!-- グローバルローダー -->
+  <div id="global-loader" class="global-loader hidden">
+    <div class="spinner"></div>
+    <span id="loader-text" class="loader-text">処理中...</span>
+  </div>
+
+  <!-- テンキー手動入力モーダル -->
+  <div id="keypad-modal" class="modal-backdrop hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="keypad-title">ID入力</h3>
+        <button id="keypad-close" class="icon-btn">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="text" id="keypad-input" class="keypad-display" readonly placeholder="000000">
+        <div class="keypad-grid">
+          <button class="num-key" data-val="1">1</button>
+          <button class="num-key" data-val="2">2</button>
+          <button class="num-key" data-val="3">3</button>
+          <button class="num-key" data-val="4">4</button>
+          <button class="num-key" data-val="5">5</button>
+          <button class="num-key" data-val="6">6</button>
+          <button class="num-key" data-val="7">7</button>
+          <button class="num-key" data-val="8">8</button>
+          <button class="num-key" data-val="9">9</button>
+          <button class="num-key" data-val="clear">C</button>
+          <button class="num-key" data-val="0">0</button>
+          <button class="num-key" data-val="backspace">⌫</button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="keypad-submit" class="btn btn-primary btn-large">確定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 設定モーダル -->
+  <div id="settings-modal" class="modal-backdrop hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Notion連携設定</h3>
+        <button id="btn-close-settings" class="icon-btn">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="input-api-key">Notion API トークン (Secret)</label>
+          <input type="password" id="input-api-key" class="form-input" placeholder="secret_xxxxxxxxxxxxxxxx">
+          <span class="text-sub">インテグレーションの内部トークンを入力します。</span>
+        </div>
+
+        <div class="form-group">
+          <label for="input-db-id">Notion データベースID</label>
+          <input type="text" id="input-db-id" class="form-input" placeholder="3dc5e314fd47808f93c4000c6f793e02">
+          <span class="text-sub">NotionのURLに含まれる32桁のデータベースID。</span>
+        </div>
+
+        <div class="form-group">
+          <label for="select-proxy-mode">通信・CORSプロキシ方式</label>
+          <select id="select-proxy-mode" class="form-select">
+            <option value="auto">自動判別 (Cloudflare Pagesなら/api、他はCORSプロキシ)</option>
+            <option value="cloudflare">Cloudflare Pages Functions (/api/...)</option>
+            <option value="corsproxy">CORS Proxy (corsproxy.io)</option>
+            <option value="custom">カスタムプロキシURL</option>
+            <option value="direct">ダイレクト (CORS無効ブラウザ・拡張機能用)</option>
+          </select>
+          <span class="text-sub">ブラウザからNotion APIを呼ぶためのCORS回避方法です。</span>
+        </div>
+
+        <div id="custom-proxy-group" class="form-group hidden">
+          <label for="input-custom-proxy">カスタムプロキシベースURL</label>
+          <input type="text" id="input-custom-proxy" class="form-input" placeholder="https://my-proxy.workers.dev">
+        </div>
+
+        <div class="form-group mt-2">
+          <button id="btn-test-connection" class="btn btn-secondary">
+            <span>疎通テストを実行</span>
+          </button>
+          <span id="connection-status-msg" class="status-text mt-2"></span>
+        </div>
+
+        <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 8px 0;">
+
+        <div class="form-group">
+          <label>別端末 (スマホ/Apple Watch) 設定用QR</label>
+          <p class="text-sub">この端末で保存した設定を他の端末に簡単に引き継ぐためのQRコードです。</p>
+          <button id="btn-generate-setup-qr" class="btn btn-secondary mt-2">
+            <span>設定用QRコードを生成</span>
+          </button>
+          <div id="setup-qr-wrapper" class="mt-3 hidden" style="text-align: center;">
+            <div id="setup-qr-preview" style="display: inline-block; padding: 10px; background: #fff; border-radius: 8px;"></div>
+            <p class="text-sub mt-2">このQRコードをカメラで読み取ると自動設定されます。</p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-save-settings" class="btn btn-primary">設定を保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- スクリプトのエントリーポイント -->
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>

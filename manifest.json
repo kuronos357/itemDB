@@ -1,0 +1,18 @@
+{
+  "name": "itemDB - 物品管理",
+  "short_name": "itemDB",
+  "description": "部屋の物と収納場所を情報空間で追跡する個人用物品管理システム",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icons/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
