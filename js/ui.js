@@ -89,6 +89,13 @@ class UIManager {
       document.getElementById('btn-cancel-nfc')?.addEventListener('click', () => {
         this.cancelNfcWrite();
       });
+
+      document.getElementById('chk-include-config-url')?.addEventListener('change', (e) => {
+        const itemId = labelModal.dataset.itemId;
+        if (itemId) {
+          this._refreshLabelModalUrlAndQr(itemId, e.target.checked);
+        }
+      });
     }
   }
 
@@ -653,23 +660,10 @@ class UIManager {
     if (idTagEl) idTagEl.textContent = `#${itemOrLocation.id}`;
     if (nameEl) nameEl.textContent = itemOrLocation.name || '名称未設定';
 
-    const baseUrl = window.location.origin + window.location.pathname;
-    const targetUrl = `${baseUrl.replace(/\/index\.html$/, '/')}?id=${itemOrLocation.id}`;
-    if (urlEl) urlEl.textContent = targetUrl;
+    const chkConfig = document.getElementById('chk-include-config-url');
+    if (chkConfig) chkConfig.checked = false; // デフォルトは通常URL
 
-    if (qrContainer) {
-      qrContainer.innerHTML = '';
-      if (window.QRCode) {
-        new window.QRCode(qrContainer, {
-          text: targetUrl,
-          width: 180,
-          height: 180,
-          colorDark: '#0f172a',
-          colorLight: '#ffffff',
-          correctLevel: window.QRCode.CorrectLevel.H
-        });
-      }
-    }
+    this._refreshLabelModalUrlAndQr(itemOrLocation.id, false);
 
     const supportedBox = document.getElementById('nfc-write-supported-box');
     const unsupportedBox = document.getElementById('nfc-write-unsupported-box');
@@ -687,12 +681,58 @@ class UIManager {
       if (unsupportedBox) unsupportedBox.classList.remove('hidden');
     }
 
-    modal.dataset.targetUrl = targetUrl;
     modal.dataset.itemId = itemOrLocation.id;
     modal.dataset.itemName = itemOrLocation.name || `ID_${itemOrLocation.id}`;
     modal.dataset.itemType = type;
 
     modal.classList.remove('hidden');
+  }
+
+  /**
+   * ラベル用URLを生成（設定含有オプション対応）
+   */
+  _generateLabelUrl(id, includeConfig = false) {
+    const baseUrl = (window.location.origin + window.location.pathname).replace(/\/index\.html$/, '/');
+    const url = new URL(baseUrl);
+    url.searchParams.set('id', id);
+
+    if (includeConfig && state.isConfigured()) {
+      const cfg = state.config;
+      if (cfg.apiKey) url.searchParams.set('api', cfg.apiKey);
+      if (cfg.itemDbId || cfg.dbId) url.searchParams.set('dbid', cfg.itemDbId || cfg.dbId);
+      if (cfg.locationDbId) url.searchParams.set('locid', cfg.locationDbId);
+      if (cfg.proxyMode) url.searchParams.set('proxy', cfg.proxyMode);
+    }
+    return url.toString();
+  }
+
+  /**
+   * モーダル内のURL文字列・データセット・QRコードを再描画
+   */
+  _refreshLabelModalUrlAndQr(id, includeConfig = false) {
+    const modal = document.getElementById('label-modal');
+    if (!modal) return;
+
+    const targetUrl = this._generateLabelUrl(id, includeConfig);
+    const urlEl = document.getElementById('label-modal-url');
+    const qrContainer = document.getElementById('label-modal-qr-container');
+
+    if (urlEl) urlEl.textContent = targetUrl;
+    modal.dataset.targetUrl = targetUrl;
+
+    if (qrContainer) {
+      qrContainer.innerHTML = '';
+      if (window.QRCode) {
+        new window.QRCode(qrContainer, {
+          text: targetUrl,
+          width: 180,
+          height: 180,
+          colorDark: '#0f172a',
+          colorLight: '#ffffff',
+          correctLevel: includeConfig ? window.QRCode.CorrectLevel.M : window.QRCode.CorrectLevel.H
+        });
+      }
+    }
   }
 
   closeLabelModal() {

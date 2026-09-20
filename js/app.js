@@ -228,25 +228,33 @@ class Application {
     const params = new URLSearchParams(window.location.search);
 
     // 1. 初期設定URL: ?dbid=...&api=... 等
-    const dbid = params.get('dbid') || params.get('db') || params.get('db_id') || params.get('database_id') || params.get('databaseId');
+    const dbid = params.get('dbid') || params.get('db') || params.get('db_id') || params.get('database_id') || params.get('databaseId') || params.get('itemDbId') || params.get('itemdb');
     const api = params.get('api') || params.get('apiKey') || params.get('api_key') || params.get('key') || params.get('token') || params.get('secret');
-    const locid = params.get('locationDbId') || params.get('locid') || params.get('location_db_id');
+    const locid = params.get('locationDbId') || params.get('locid') || params.get('location_db_id') || params.get('locationdb');
     const proxy = params.get('proxy') || params.get('proxyMode');
+    const id = params.get('id');
+
     if (dbid || api) {
+      const hasDirectId = (id && /^\d+$/.test(id));
       await this._applySetupConfig({
         dbId: dbid,
         apiKey: api,
         locationDbId: locid,
         proxyMode: proxy
-      });
+      }, null, !hasDirectId);
+
       // URLから秘密トークンを除去
       const cleanUrl = window.location.pathname;
       window.history.replaceState({}, document.title, cleanUrl);
+
+      if (hasDirectId) {
+        await this.onIdScanned(id);
+        return true;
+      }
       return false; // ホームへ
     }
 
     // 2. ID読み込みURL: ?id=1234
-    const id = params.get('id');
     if (id && /^\d+$/.test(id)) {
       await this.onIdScanned(id);
       return true;
@@ -258,7 +266,7 @@ class Application {
   /**
    * 初期設定の適用
    */
-  async _applySetupConfig(configInput, legacyApi) {
+  async _applySetupConfig(configInput, legacyApi, autoSwitchHome = true) {
     let config = configInput;
     if (typeof configInput === 'string') {
       config = { dbId: configInput, apiKey: legacyApi };
@@ -292,7 +300,9 @@ class Application {
         feedback.playError();
       } finally {
         ui.setLoading(false);
-        this.switchMode(AppMode.HOME);
+        if (autoSwitchHome) {
+          this.switchMode(AppMode.HOME);
+        }
       }
     } else {
       // 一部のみ設定できた場合 (例: APIキーのみスキャンした)

@@ -174,7 +174,18 @@
           <div class="label-url-text" id="label-modal-url">https://itemdb.pages.dev/?id=0</div>
         </div>
 
-        <div class="label-action-row mt-3">
+        <div class="label-url-options mt-2" style="background: rgba(30, 41, 59, 0.4); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 8px 12px;">
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; cursor: pointer; color: var(--text-color);">
+            <input type="checkbox" id="chk-include-config-url">
+            <span>⚙️ 接続設定（APIキー等）を含める <small style="color: var(--color-item);">(Apple Watch・未設定端末用)</small></span>
+          </label>
+          <p class="text-sub mt-1" style="font-size: 0.72rem; color: var(--text-muted); margin: 4px 0 0 24px; line-height: 1.4;">
+            設定が未保存の環境でもURLから自動接続して開けます。<br>
+            ※NFCタグ書き込みには容量の大きい <strong>NTAG215 (504B)</strong> を推奨します。
+          </p>
+        </div>
+
+        <div class="label-action-row mt-2">
           <button id="btn-copy-label-url" class="btn btn-secondary">
             <span>📋 URLコピー</span>
           </button>
