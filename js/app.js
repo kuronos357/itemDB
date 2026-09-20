@@ -159,6 +159,15 @@ class Application {
         return;
       }
 
+      // アクティブ・非アクティブ切り替えボタン
+      const toggleActiveBtn = e.target.closest('#btn-toggle-active');
+      if (toggleActiveBtn) {
+        const pageId = toggleActiveBtn.dataset.pageId;
+        const currentActive = toggleActiveBtn.dataset.isActive === 'true';
+        this._toggleActiveStatus(pageId, !currentActive);
+        return;
+      }
+
       // 場所画面: 「物品を追加」ボタン（手入力・スキャンで直ちに現在地に登録）
       if (e.target.closest('#btn-add-item-to-location')) {
         ui.openKeypad('物品ID (偶数) を入力して追加', '', (val) => this._addItemToCurrentLocation(val));
@@ -583,6 +592,37 @@ class Application {
     } catch (err) {
       ui.showToast(`移動更新エラー: ${err.message}`, 'error');
       feedback.playError();
+    } finally {
+      ui.setLoading(false);
+    }
+  }
+
+  /**
+   * 物品または場所のアクティブ／非アクティブ切り替え
+   */
+  async _toggleActiveStatus(pageId, nextActive) {
+    if (!pageId) return;
+
+    ui.setLoading(true, nextActive ? 'アクティブに設定中...' : '非アクティブに設定中...');
+
+    try {
+      const updated = await notion.updateActiveStatus(pageId, nextActive);
+      feedback.playSuccess();
+      ui.showToast(nextActive ? '🟢 アクティブに設定しました' : '⚪ 非アクティブに設定しました', 'success');
+
+      // 現在表示中のレコードを更新して再描画
+      if (state.currentItem && state.currentItem.pageId === pageId) {
+        state.currentItem.isActive = nextActive;
+        state.currentItem.status = nextActive ? 'アクティブ' : '非アクティブ';
+        ui.renderItemView(state.currentItem, state.currentLocation, state.parentLocation);
+      } else if (state.currentLocation && state.currentLocation.pageId === pageId) {
+        state.currentLocation.isActive = nextActive;
+        state.currentLocation.status = nextActive ? 'アクティブ' : '非アクティブ';
+        ui.renderLocationView(state.currentLocation, state.locationItems, state.subLocations, state.parentLocation);
+      }
+    } catch (err) {
+      feedback.playError();
+      ui.showToast(`ステータス更新失敗: ${err.message}`, 'error');
     } finally {
       ui.setLoading(false);
     }

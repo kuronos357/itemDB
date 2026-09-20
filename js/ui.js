@@ -257,12 +257,18 @@ class UIManager {
               </div>
             ` : ''}
 
-            ${item.status ? `
-              <div class="prop-item">
-                <span class="prop-label">状態</span>
-                <span class="prop-value">${item.status}</span>
+            <!-- ステータス・アクティブ制御 -->
+            <div class="prop-item highlight-status">
+              <span class="prop-label">ステータス</span>
+              <div class="prop-val-row space-between">
+                <span class="badge ${item.isActive === false ? 'badge-inactive' : 'badge-active'}">
+                  ${item.isActive === false ? '⚪ 非アクティブ' : '🟢 アクティブ'}
+                </span>
+                <button id="btn-toggle-active" class="btn btn-sm ${item.isActive === false ? 'btn-outline-active' : 'btn-outline-inactive'}" data-page-id="${item.pageId}" data-is-active="${item.isActive === false ? 'false' : 'true'}" title="ステータスを切り替える">
+                  ${item.isActive === false ? '🟢 有効化 (アクティブ)' : '⚪ 非アクティブ化'}
+                </button>
               </div>
-            ` : ''}
+            </div>
 
             ${item.notes && (!item.attributes || item.notes !== item.attributes.join(' / ')) ? `
               <div class="prop-item">
@@ -364,6 +370,19 @@ class UIManager {
             </div>
           ` : ''}
 
+          ${location.isActive !== null ? `
+            <div class="prop-item mt-2">
+              <div class="prop-val-row space-between">
+                <span class="badge ${location.isActive === false ? 'badge-inactive' : 'badge-active'}">
+                  ${location.isActive === false ? '⚪ 非アクティブ' : '🟢 アクティブ'}
+                </span>
+                <button id="btn-toggle-active" class="btn btn-sm ${location.isActive === false ? 'btn-outline-active' : 'btn-outline-inactive'}" data-page-id="${location.pageId}" data-is-active="${location.isActive === false ? 'false' : 'true'}" title="場所のステータスを切り替える">
+                  ${location.isActive === false ? '🟢 有効化' : '⚪ 非アクティブ化'}
+                </button>
+              </div>
+            </div>
+          ` : ''}
+
           <div class="action-buttons mt-3 mb-3">
             <button id="btn-add-item-to-location" class="btn btn-primary btn-large">
               <span class="btn-icon">➕</span>
@@ -419,9 +438,11 @@ class UIManager {
             ` : `
               <div class="item-list">
                 ${items.map(item => `
-                  <a href="?id=${item.id}" class="item-card-compact" data-item-id="${item.id}">
+                  <a href="?id=${item.id}" class="item-card-compact ${item.isActive === false ? 'item-inactive' : ''}" data-item-id="${item.id}">
                     <div class="item-compact-info">
-                      <span class="badge badge-even badge-small">物品</span>
+                      <span class="badge ${item.isActive === false ? 'badge-inactive-sm' : 'badge-even'} badge-small">
+                        ${item.isActive === false ? '非アクティブ' : '物品'}
+                      </span>
                       <span class="item-compact-name">${item.name || '名称未設定'}</span>
                       ${item.attributes && item.attributes.length > 0 ? `<span class="badge badge-tag badge-small">${item.attributes[0]}</span>` : ''}
                     </div>
