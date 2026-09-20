@@ -1117,11 +1117,52 @@ body {
   background: rgba(30, 41, 59, 0.5);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  padding: 10px 12px;
+  padding: 12px;
 }
 
-.nfc-helper-guide {
-  text-align: center;
+.nfc-step-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.nfc-step-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-color);
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 6px;
+}
+
+.nfc-step-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.nfc-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--color-item);
+  color: #ffffff;
+  font-size: 0.75rem;
+  font-weight: bold;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.nfc-step-content {
+  flex: 1;
+}
+
+.nfc-step-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-color);
 }
 
 /* ==========================================================================
