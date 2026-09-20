@@ -3,7 +3,7 @@
  * アプリケーションシェルのオフラインキャッシュ
  */
 
-const CACHE_NAME = 'itemdb-cache-v11';
+const CACHE_NAME = 'itemdb-cache-v12';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -50,6 +50,16 @@ self.addEventListener('fetch', (event) => {
       if (cachedResponse) {
         return cachedResponse;
       }
+
+      // /index.html または ルート(/) へのリクエスト時のフォールバック
+      const url = new URL(event.request.url);
+      if (url.pathname.endsWith('/index.html')) {
+        return caches.match('./').then((rootResponse) => {
+          if (rootResponse) return rootResponse;
+          return fetch(event.request);
+        });
+      }
+
       return fetch(event.request).then((networkResponse) => {
         if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
           return networkResponse;
