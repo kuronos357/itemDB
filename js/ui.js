@@ -685,6 +685,13 @@ class UIManager {
       if (unsupportedBox) unsupportedBox.classList.remove('hidden');
     }
 
+    // NFC Helper アプリ連携 URLスキーム (iOS)
+    const btnHelper = document.getElementById('btn-write-nfc-helper');
+    if (btnHelper) {
+      const callbackUrl = encodeURIComponent(window.location.href);
+      btnHelper.href = `nfchelper://write?url=${encodeURIComponent(targetUrl)}&callback=${callbackUrl}`;
+    }
+
     modal.dataset.targetUrl = targetUrl;
     modal.dataset.itemId = itemOrLocation.id;
     modal.dataset.itemName = itemOrLocation.name || `ID_${itemOrLocation.id}`;

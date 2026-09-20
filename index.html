@@ -204,9 +204,21 @@
             </div>
           </div>
 
-          <div id="nfc-write-unsupported-box" class="nfc-unsupported-note hidden mt-2">
-            <p class="text-sub">⚠️ お使いの環境（iOS Safari / PCなど）はブラウザからのNFC書き込みに対応していません。</p>
-            <p class="text-sub">上記の「URLコピー」を使い、無料アプリ「<strong>NFC Tools</strong>」等でタグに書き込んでください。</p>
+          <div id="nfc-write-unsupported-box" class="nfc-unsupported-box hidden mt-2">
+            <a id="btn-write-nfc-helper" href="#" class="btn btn-primary" style="width: 100%; text-decoration: none;">
+              <span>📲 NFC Helper で書き込む (iOS)</span>
+            </a>
+            <div class="nfc-helper-guide mt-2">
+              <p class="text-sub">タップすると「NFC Helper」アプリが起動し、URL入力済みでそのままタグにかざせます。</p>
+              <div class="helper-links mt-1">
+                <a href="https://apps.apple.com/app/nfc-helper/id1527376518" target="_blank" rel="noopener" class="text-sub" style="color: var(--color-item); text-decoration: underline;">
+                  App Store で NFC Helper を入手 (無料) ↗
+                </a>
+              </div>
+            </div>
+            <div class="mt-2 text-sub" style="border-top: 1px dashed var(--border-color); padding-top: 8px; font-size: 0.75rem; color: var(--text-muted);">
+              ※NFC Tools等の他アプリを使う場合は、上の「📋 URLコピー」を使って書き込んでください。
+            </div>
           </div>
         </div>
       </div>
