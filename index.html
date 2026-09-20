@@ -206,39 +206,39 @@
 
           <div id="nfc-write-unsupported-box" class="nfc-unsupported-box hidden mt-2">
             <div class="nfc-step-box">
-              <div class="nfc-step-title">iOSでのNFC書き込み手順（簡単2ステップ）</div>
+              <div class="nfc-step-title">
+                <span>📱 iOS / PC でのNFC書き込み方法（無料・約30秒）</span>
+              </div>
+              <p class="text-sub" style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 4px;">
+                ※iOS Safariの制限により、無料アプリ「NFC Tools」を使ってタグに書き込みます。
+              </p>
 
               <!-- STEP 1 -->
               <div class="nfc-step-item">
                 <span class="nfc-step-num">1</span>
                 <div class="nfc-step-content">
-                  <div class="nfc-step-label">アプリの準備（初回のみ・無料）</div>
-                  <a href="https://apps.apple.com/jp/app/nfc-helper/id1527376518" target="_blank" rel="noopener" class="btn btn-secondary btn-sm mt-1" style="display: inline-flex; align-items: center; justify-content: center; width: 100%; text-decoration: none;">
-                    <span>📥 App Store で「NFC-Helper」を入手</span>
-                  </a>
-                  <p class="text-sub mt-1" style="font-size: 0.75rem; color: #f59e0b;">
-                    ⚠️ 未インストールのまま手順2を押すと「アドレスが無効です」と表示されます。
-                  </p>
+                  <div class="nfc-step-label">このアイテムのURLをコピー</div>
+                  <button id="btn-copy-url-nfc" class="btn btn-secondary btn-sm mt-1" style="width: 100%;">
+                    <span>📋 個別URLをコピー</span>
+                  </button>
                 </div>
               </div>
 
               <!-- STEP 2 -->
-              <div class="nfc-step-item mt-2">
+              <div class="nfc-step-item mt-1">
                 <span class="nfc-step-num">2</span>
                 <div class="nfc-step-content">
-                  <div class="nfc-step-label">タグにかざして書き込む</div>
-                  <a id="btn-write-nfc-helper" href="#" class="btn btn-primary mt-1" style="display: flex; align-items: center; justify-content: center; text-decoration: none; width: 100%;">
-                    <span>📲 NFC Helper で書き込む</span>
-                  </a>
-                  <p class="text-sub mt-1" style="font-size: 0.75rem; color: var(--text-muted);">
-                    URL入力済みで起動します。iPhone上部をタグにかざせば完了！
+                  <div class="nfc-step-label">無料アプリ「NFC Tools」で書き込む</div>
+                  <p class="text-sub mt-1" style="font-size: 0.75rem; line-height: 1.5;">
+                    アプリを開き <strong>「書く」➔「レコードを追加」➔「URL / URI」</strong> に貼り付けて <strong>「書き込み」</strong> をタップし、タグにかざしてください。
                   </p>
+                  <div class="mt-1">
+                    <a href="https://apps.apple.com/jp/app/nfc-tools/id1252962749" target="_blank" rel="noopener" class="text-sub" style="color: var(--color-item); text-decoration: underline; font-size: 0.78rem;">
+                      App Store で NFC Tools (WAKDEV) を入手 (無料) ↗
+                    </a>
+                  </div>
                 </div>
               </div>
-            </div>
-
-            <div class="mt-2 text-sub" style="border-top: 1px dashed var(--border-color); padding-top: 8px; font-size: 0.75rem; color: var(--text-muted);">
-              ※NFC Tools等をお使いの場合は、上の「📋 URLコピー」を使って手動で書き込んでください。
             </div>
           </div>
         </div>

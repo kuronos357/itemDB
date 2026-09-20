@@ -61,7 +61,7 @@ class UIManager {
         this.closeLabelModal();
       });
 
-      document.getElementById('btn-copy-label-url')?.addEventListener('click', () => {
+      const copyUrlHandler = () => {
         const url = labelModal.dataset.targetUrl;
         if (url) {
           navigator.clipboard.writeText(url).then(() => {
@@ -70,7 +70,9 @@ class UIManager {
             this.showToast('URLのコピーに失敗しました', 'error');
           });
         }
-      });
+      };
+      document.getElementById('btn-copy-label-url')?.addEventListener('click', copyUrlHandler);
+      document.getElementById('btn-copy-url-nfc')?.addEventListener('click', copyUrlHandler);
 
       document.getElementById('btn-download-label-qr')?.addEventListener('click', () => {
         this.downloadLabelImage();
@@ -683,13 +685,6 @@ class UIManager {
     } else {
       if (supportedBox) supportedBox.classList.add('hidden');
       if (unsupportedBox) unsupportedBox.classList.remove('hidden');
-    }
-
-    // NFC Helper アプリ連携 URLスキーム (iOS)
-    const btnHelper = document.getElementById('btn-write-nfc-helper');
-    if (btnHelper) {
-      const callbackUrl = encodeURIComponent(window.location.href);
-      btnHelper.href = `nfchelper://write?url=${encodeURIComponent(targetUrl)}&callback=${callbackUrl}`;
     }
 
     modal.dataset.targetUrl = targetUrl;
