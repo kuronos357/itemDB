@@ -66,6 +66,11 @@ class Application {
       ui.showToast('有効なID (数字) またはURLが検出されませんでした', 'warning');
     });
 
+    // カメラ状態変更のUI同期 (背面/前面/停止)
+    scanner.addEventListener('camera-state-changed', (e) => {
+      ui.updateCameraStateUI(e.detail.state);
+    });
+
     // 設定モーダルの開閉
     document.getElementById('btn-header-settings')?.addEventListener('click', () => {
       ui.renderSettingsModal();
@@ -123,9 +128,19 @@ class Application {
         return;
       }
 
-      // カメラ切替
+      // カメラ切替 (背面 -> 前面 -> 停止 -> 背面)
       if (e.target.closest('#btn-toggle-camera')) {
-        scanner.stopCamera().then(() => scanner.startCamera('qr-reader'));
+        scanner.cycleCamera('qr-reader').catch(() => {});
+        return;
+      }
+
+      // ラベル・QR・NFC発行モーダル起動
+      if (e.target.closest('#btn-open-label-modal')) {
+        if (state.currentMode === AppMode.ITEM_VIEW && state.currentItem) {
+          ui.renderLabelModal(state.currentItem, 'item');
+        } else if (state.currentMode === AppMode.LOCATION_VIEW && state.currentLocation) {
+          ui.renderLabelModal(state.currentLocation, 'location');
+        }
         return;
       }
 
@@ -297,7 +312,11 @@ class Application {
     switch (mode) {
       case AppMode.HOME:
         ui.renderHomeView();
-        setTimeout(() => scanner.startCamera('qr-reader').catch(() => {}), 100);
+        if (scanner.cameraEnabled) {
+          setTimeout(() => scanner.startCamera('qr-reader').catch(() => {}), 100);
+        } else {
+          ui.updateCameraStateUI('off');
+        }
         break;
 
       case AppMode.ITEM_VIEW:
@@ -306,7 +325,11 @@ class Application {
 
       case AppMode.CHANGE_LOCATION_PENDING:
         ui.renderChangeLocationPendingView(state.currentItem);
-        setTimeout(() => scanner.startCamera('qr-reader').catch(() => {}), 100);
+        if (scanner.cameraEnabled) {
+          setTimeout(() => scanner.startCamera('qr-reader').catch(() => {}), 100);
+        } else {
+          ui.updateCameraStateUI('off');
+        }
         break;
 
       case AppMode.LOCATION_VIEW:
@@ -315,7 +338,11 @@ class Application {
 
       case AppMode.LOCATION_EDIT_BATCH:
         ui.renderLocationEditBatchView(state.currentLocation, state.locationItems);
-        setTimeout(() => scanner.startCamera('qr-reader').catch(() => {}), 100);
+        if (scanner.cameraEnabled) {
+          setTimeout(() => scanner.startCamera('qr-reader').catch(() => {}), 100);
+        } else {
+          ui.updateCameraStateUI('off');
+        }
         break;
     }
   }

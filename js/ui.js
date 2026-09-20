@@ -5,6 +5,8 @@
  */
 
 import { AppMode, state } from './state.js';
+import { scanner } from './scanner.js';
+import { feedback } from './audio.js';
 
 class UIManager {
   constructor() {
@@ -49,6 +51,41 @@ class UIManager {
 
       document.getElementById('keypad-close')?.addEventListener('click', () => {
         this.closeKeypad();
+      });
+    }
+
+    // ラベル・QR・NFCモーダルのイベント配線
+    const labelModal = document.getElementById('label-modal');
+    if (labelModal) {
+      document.getElementById('btn-close-label-modal')?.addEventListener('click', () => {
+        this.closeLabelModal();
+      });
+
+      document.getElementById('btn-copy-label-url')?.addEventListener('click', () => {
+        const url = labelModal.dataset.targetUrl;
+        if (url) {
+          navigator.clipboard.writeText(url).then(() => {
+            this.showToast('URLをクリップボードにコピーしました', 'success');
+          }).catch(() => {
+            this.showToast('URLのコピーに失敗しました', 'error');
+          });
+        }
+      });
+
+      document.getElementById('btn-download-label-qr')?.addEventListener('click', () => {
+        this.downloadLabelImage();
+      });
+
+      document.getElementById('btn-print-label')?.addEventListener('click', () => {
+        window.print();
+      });
+
+      document.getElementById('btn-write-nfc')?.addEventListener('click', () => {
+        this.startNfcWrite();
+      });
+
+      document.getElementById('btn-cancel-nfc')?.addEventListener('click', () => {
+        this.cancelNfcWrite();
       });
     }
   }
@@ -146,8 +183,8 @@ class UIManager {
             <span>テンキー入力</span>
           </button>
           <button id="btn-toggle-camera" class="btn btn-secondary action-btn">
-            <span class="btn-icon">📷</span>
-            <span>カメラ切替</span>
+            <span class="btn-icon">${scanner.getCameraState() === 'off' ? '📷' : (scanner.getCameraState() === 'user' ? '⏹️' : '🔄')}</span>
+            <span>${scanner.getCameraState() === 'off' ? 'カメラ起動' : (scanner.getCameraState() === 'user' ? 'カメラ停止' : '前面カメラ')}</span>
           </button>
         </div>
 
@@ -240,6 +277,10 @@ class UIManager {
               <span class="btn-icon">📍</span>
               <span>場所変更</span>
             </button>
+            <button id="btn-open-label-modal" class="btn btn-secondary">
+              <span class="btn-icon">🏷️</span>
+              <span>ラベル・QR</span>
+            </button>
             ${item.url ? `
               <a href="${item.url}" target="_blank" rel="noopener" class="btn btn-outline">
                 <span>Notionで開く ↗</span>
@@ -331,6 +372,10 @@ class UIManager {
             <button id="btn-edit-batch" class="btn btn-secondary">
               <span class="btn-icon">⚡</span>
               <span>一括棚卸</span>
+            </button>
+            <button id="btn-open-label-modal" class="btn btn-secondary">
+              <span class="btn-icon">🏷️</span>
+              <span>ラベル・QR</span>
             </button>
             ${location.url ? `
               <a href="${location.url}" target="_blank" rel="noopener" class="btn btn-outline">
@@ -509,6 +554,263 @@ class UIManager {
     } else {
       loader.classList.add('hidden');
     }
+  }
+
+  /**
+   * カメラ状態に応じたUI（ボタン表記、ビューファインダーのプレースホルダー）更新
+   * @param {'environment' | 'user' | 'off'} cameraState 
+   */
+  updateCameraStateUI(cameraState) {
+    const toggleBtn = document.getElementById('btn-toggle-camera');
+    const qrReaderEl = document.getElementById('qr-reader');
+    const guideLabel = document.querySelector('.guide-label');
+
+    if (toggleBtn) {
+      if (cameraState === 'environment') {
+        toggleBtn.innerHTML = `<span class="btn-icon">🔄</span><span>前面カメラ</span>`;
+        toggleBtn.title = '前面カメラに切り替え';
+      } else if (cameraState === 'user') {
+        toggleBtn.innerHTML = `<span class="btn-icon">⏹️</span><span>カメラ停止</span>`;
+        toggleBtn.title = 'カメラを停止';
+      } else {
+        toggleBtn.innerHTML = `<span class="btn-icon">📷</span><span>カメラ起動</span>`;
+        toggleBtn.title = '背面カメラを起動';
+      }
+    }
+
+    if (qrReaderEl) {
+      const existingPlaceholder = document.getElementById('camera-off-placeholder');
+      if (cameraState === 'off') {
+        if (!existingPlaceholder) {
+          const placeholder = document.createElement('div');
+          placeholder.id = 'camera-off-placeholder';
+          placeholder.className = 'camera-off-placeholder';
+          placeholder.innerHTML = `
+            <div class="camera-off-icon">📷</div>
+            <div class="camera-off-text">カメラは停止中です</div>
+            <div class="camera-off-sub">タップしてカメラを起動</div>
+          `;
+          placeholder.addEventListener('click', () => {
+            scanner.cycleCamera('qr-reader').catch(() => {});
+          });
+          qrReaderEl.appendChild(placeholder);
+        }
+        if (guideLabel) {
+          guideLabel.textContent = 'カメラ停止中 (テンキー入力またはタップで起動)';
+        }
+      } else {
+        if (existingPlaceholder) {
+          existingPlaceholder.remove();
+        }
+        if (guideLabel && state.isConfigured()) {
+          guideLabel.textContent = 'QRコードまたはNFCを読み取り';
+        }
+      }
+    }
+  }
+
+  /**
+   * ラベル・QR・NFC発行モーダルの表示・生成
+   */
+  renderLabelModal(itemOrLocation, type = 'item') {
+    const modal = document.getElementById('label-modal');
+    if (!modal || !itemOrLocation) return;
+
+    const isItem = (type === 'item');
+    const badgeEl = document.getElementById('label-modal-badge');
+    const idTagEl = document.getElementById('label-modal-id-tag');
+    const nameEl = document.getElementById('label-modal-name');
+    const urlEl = document.getElementById('label-modal-url');
+    const qrContainer = document.getElementById('label-modal-qr-container');
+
+    if (badgeEl) {
+      badgeEl.className = `badge ${isItem ? 'badge-even' : 'badge-odd'}`;
+      badgeEl.textContent = isItem ? '物品 (偶数ID)' : '場所 (奇数ID)';
+    }
+    if (idTagEl) idTagEl.textContent = `#${itemOrLocation.id}`;
+    if (nameEl) nameEl.textContent = itemOrLocation.name || '名称未設定';
+
+    const baseUrl = window.location.origin + window.location.pathname;
+    const targetUrl = `${baseUrl.replace(/\/index\.html$/, '/')}?id=${itemOrLocation.id}`;
+    if (urlEl) urlEl.textContent = targetUrl;
+
+    if (qrContainer) {
+      qrContainer.innerHTML = '';
+      if (window.QRCode) {
+        new window.QRCode(qrContainer, {
+          text: targetUrl,
+          width: 180,
+          height: 180,
+          colorDark: '#0f172a',
+          colorLight: '#ffffff',
+          correctLevel: window.QRCode.CorrectLevel.H
+        });
+      }
+    }
+
+    const supportedBox = document.getElementById('nfc-write-supported-box');
+    const unsupportedBox = document.getElementById('nfc-write-unsupported-box');
+    const statusBox = document.getElementById('nfc-write-status');
+    const writeBtn = document.getElementById('btn-write-nfc');
+
+    if (statusBox) statusBox.classList.add('hidden');
+    if (writeBtn) writeBtn.disabled = false;
+
+    if (scanner.isNfcSupported()) {
+      if (supportedBox) supportedBox.classList.remove('hidden');
+      if (unsupportedBox) unsupportedBox.classList.add('hidden');
+    } else {
+      if (supportedBox) supportedBox.classList.add('hidden');
+      if (unsupportedBox) unsupportedBox.classList.remove('hidden');
+    }
+
+    modal.dataset.targetUrl = targetUrl;
+    modal.dataset.itemId = itemOrLocation.id;
+    modal.dataset.itemName = itemOrLocation.name || `ID_${itemOrLocation.id}`;
+    modal.dataset.itemType = type;
+
+    modal.classList.remove('hidden');
+  }
+
+  closeLabelModal() {
+    const modal = document.getElementById('label-modal');
+    if (modal) {
+      modal.classList.add('hidden');
+      this.cancelNfcWrite();
+    }
+  }
+
+  downloadLabelImage() {
+    const modal = document.getElementById('label-modal');
+    const id = modal?.dataset.itemId || 'item';
+    const name = modal?.dataset.itemName || '';
+    const type = modal?.dataset.itemType || 'item';
+    const qrCanvas = document.querySelector('#label-modal-qr-container canvas');
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const width = 400;
+    const height = 520;
+    canvas.width = width;
+    canvas.height = height;
+
+    // 背景（白）
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+
+    // 外枠
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(10, 10, width - 20, height - 20);
+
+    // ヘッダー（バッジ・ID）
+    ctx.fillStyle = type === 'item' ? '#38bdf8' : '#fb923c';
+    if (ctx.roundRect) {
+      ctx.beginPath();
+      ctx.roundRect(24, 24, 110, 32, 6);
+      ctx.fill();
+    } else {
+      ctx.fillRect(24, 24, 110, 32);
+    }
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 15px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(type === 'item' ? '物品 (Even)' : '場所 (Odd)', 79, 46);
+
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 24px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(`#${id}`, width - 24, 48);
+
+    // アイテム名
+    ctx.font = 'bold 19px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#0f172a';
+    let displayName = name;
+    if (displayName.length > 18) displayName = displayName.slice(0, 17) + '…';
+    ctx.fillText(displayName, width / 2, 92);
+
+    // QRコード描画
+    if (qrCanvas) {
+      const qrSize = 260;
+      ctx.drawImage(qrCanvas, (width - qrSize) / 2, 115, qrSize, qrSize);
+    }
+
+    // URLテキスト
+    ctx.font = '12px monospace';
+    ctx.fillStyle = '#64748b';
+    ctx.textAlign = 'center';
+    const url = modal?.dataset.targetUrl || `https://itemdb.pages.dev/?id=${id}`;
+    ctx.fillText(url, width / 2, 410);
+
+    // itemDB フッター
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillText('itemDB Logistics & Cache', width / 2, 450);
+
+    // PNGダウンロード実行
+    const dataUrl = canvas.toDataURL('image/png');
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = `itemDB_${type}_${id}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    this.showToast('ラベル画像を保存しました', 'success');
+  }
+
+  async startNfcWrite() {
+    const modal = document.getElementById('label-modal');
+    const url = modal?.dataset.targetUrl;
+    if (!url) return;
+
+    const statusBox = document.getElementById('nfc-write-status');
+    const msgEl = document.getElementById('nfc-status-msg');
+    const writeBtn = document.getElementById('btn-write-nfc');
+
+    if (this.nfcAbortController) {
+      this.nfcAbortController.abort();
+    }
+    this.nfcAbortController = new AbortController();
+
+    if (statusBox) statusBox.classList.remove('hidden');
+    if (writeBtn) writeBtn.disabled = true;
+    if (msgEl) msgEl.textContent = 'スマートフォンの背面にNFCタグをかざしてください...';
+
+    try {
+      await scanner.writeNfc(url, this.nfcAbortController.signal);
+      feedback.playSuccess();
+      this.showToast('NFCタグへの書き込みが完了しました！', 'success');
+      if (msgEl) msgEl.innerHTML = '<span style="color:#4ade80;">✓ 書き込みが完了しました！</span>';
+      setTimeout(() => {
+        if (statusBox) statusBox.classList.add('hidden');
+        if (writeBtn) writeBtn.disabled = false;
+      }, 2000);
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        this.showToast('NFC書き込みをキャンセルしました', 'info');
+      } else {
+        feedback.playError();
+        this.showToast(`NFC書き込み失敗: ${err.message}`, 'error');
+        if (msgEl) msgEl.innerHTML = `<span style="color:#f87171;">エラー: ${err.message}</span>`;
+      }
+      if (statusBox) statusBox.classList.add('hidden');
+      if (writeBtn) writeBtn.disabled = false;
+    } finally {
+      this.nfcAbortController = null;
+    }
+  }
+
+  cancelNfcWrite() {
+    if (this.nfcAbortController) {
+      this.nfcAbortController.abort();
+      this.nfcAbortController = null;
+    }
+    const statusBox = document.getElementById('nfc-write-status');
+    const writeBtn = document.getElementById('btn-write-nfc');
+    if (statusBox) statusBox.classList.add('hidden');
+    if (writeBtn) writeBtn.disabled = false;
   }
 }
 

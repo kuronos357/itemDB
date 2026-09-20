@@ -19,6 +19,19 @@ class ScannerService extends EventTarget {
     this.lastScannedTime = 0;
     this.nfcReader = null;
     this.isNfcActive = false;
+    this.cameraFacingMode = 'environment'; // 'environment' | 'user'
+    this.cameraEnabled = true;             // ユーザーのカメラON/OFF状態
+    this.currentElementId = 'qr-reader';
+  }
+
+  /**
+   * 現在のカメラ状態を取得 ('environment' | 'user' | 'off')
+   */
+  getCameraState() {
+    if (!this.cameraEnabled || !this.isScanning) {
+      return 'off';
+    }
+    return this.cameraFacingMode;
   }
 
   /**
@@ -63,9 +76,43 @@ class ScannerService extends EventTarget {
   }
 
   /**
+   * カメラの切り替えサイクル (背面 -> 前面 -> OFF -> 背面)
+   */
+  async cycleCamera(elementId = 'qr-reader') {
+    this.currentElementId = elementId;
+
+    if (!this.cameraEnabled || !this.isScanning) {
+      // OFF状態 -> 背面カメラ起動
+      this.cameraEnabled = true;
+      this.cameraFacingMode = 'environment';
+      await this.startCamera(elementId);
+    } else if (this.cameraFacingMode === 'environment') {
+      // 背面カメラ -> 前面カメラへ切替
+      this.cameraFacingMode = 'user';
+      await this.stopCamera();
+      await this.startCamera(elementId);
+    } else {
+      // 前面カメラ -> カメラOFFへ
+      this.cameraEnabled = false;
+      await this.stopCamera();
+    }
+
+    const nextState = this.getCameraState();
+    this.dispatchEvent(new CustomEvent('camera-state-changed', {
+      detail: { state: nextState, facingMode: this.cameraFacingMode, enabled: this.cameraEnabled }
+    }));
+    return nextState;
+  }
+
+  /**
    * カメラQRスキャナの初期化・起動
    */
   async startCamera(elementId = 'qr-reader') {
+    this.currentElementId = elementId;
+    if (!this.cameraEnabled) {
+      // ユーザーが意図的にOFFにしている場合は起動しない
+      return;
+    }
     if (this.isScanning) return;
 
     if (!window.Html5Qrcode) {
@@ -89,14 +136,19 @@ class ScannerService extends EventTarget {
       };
 
       await this.html5QrCode.start(
-        { facingMode: 'environment' },
+        { facingMode: this.cameraFacingMode },
         config,
         (decodedText) => this._onScanSuccess(decodedText),
         () => {} // スキャン途中のフレームミスは無視
       );
 
       this.isScanning = true;
-      this.dispatchEvent(new CustomEvent('scanner-started'));
+      this.dispatchEvent(new CustomEvent('scanner-started', {
+        detail: { facingMode: this.cameraFacingMode }
+      }));
+      this.dispatchEvent(new CustomEvent('camera-state-changed', {
+        detail: { state: this.cameraFacingMode, facingMode: this.cameraFacingMode, enabled: true }
+      }));
     } catch (err) {
       console.error('[Scanner] Failed to start camera:', err);
       this.dispatchEvent(new CustomEvent('scanner-error', { detail: err }));
@@ -116,6 +168,9 @@ class ScannerService extends EventTarget {
       this.html5QrCode = null;
       this.isScanning = false;
       this.dispatchEvent(new CustomEvent('scanner-stopped'));
+      this.dispatchEvent(new CustomEvent('camera-state-changed', {
+        detail: { state: this.getCameraState(), facingMode: this.cameraFacingMode, enabled: this.cameraEnabled }
+      }));
     } catch (err) {
       console.error('[Scanner] Error stopping camera:', err);
     }
@@ -298,6 +353,46 @@ class ScannerService extends EventTarget {
       console.warn('[Scanner] Web NFC not permitted or available:', err);
       this.isNfcActive = false;
       return false;
+    }
+  }
+
+  /**
+   * Web NFCが利用可能かどうかを判定
+   */
+  isNfcSupported() {
+    return ('NDEFReader' in window);
+  }
+
+  /**
+   * Web NFC APIによりNFCタグへURLを書き込む
+   * @param {string} url 書き込むURL
+   * @param {AbortSignal} [signal] 書き込み待機キャンセル用シグナル
+   */
+  async writeNfc(url, signal = null) {
+    if (!this.isNfcSupported()) {
+      throw new Error('お使いの環境（ブラウザ/OS）はWeb NFC書き込みに対応していません。');
+    }
+
+    try {
+      const ndef = new window.NDEFReader();
+      const options = {};
+      if (signal) {
+        options.signal = signal;
+      }
+
+      await ndef.write({
+        records: [
+          {
+            recordType: 'url',
+            data: url
+          }
+        ]
+      }, options);
+
+      return true;
+    } catch (err) {
+      console.error('[Scanner] NFC Write Error:', err);
+      throw err;
     }
   }
 }

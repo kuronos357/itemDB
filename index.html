@@ -150,6 +150,69 @@
     </div>
   </div>
 
+  <!-- ラベル・QR・NFC発行モーダル -->
+  <div id="label-modal" class="modal-backdrop hidden">
+    <div class="modal-content label-modal-content">
+      <div class="modal-header">
+        <div class="modal-title-row">
+          <span class="modal-icon">🏷️</span>
+          <h3>ラベル・QRコード発行</h3>
+        </div>
+        <button id="btn-close-label-modal" class="icon-btn">✕</button>
+      </div>
+      <div class="modal-body label-modal-body">
+        <div class="label-card-preview" id="label-card-printable">
+          <div class="label-header-info">
+            <span id="label-modal-badge" class="badge badge-even">物品</span>
+            <span id="label-modal-id-tag" class="id-tag">#0</span>
+          </div>
+          <div id="label-modal-name" class="label-item-name">アイテム名</div>
+          
+          <div class="label-qr-wrapper">
+            <div id="label-modal-qr-container" class="qr-box"></div>
+          </div>
+          <div class="label-url-text" id="label-modal-url">https://itemdb.pages.dev/?id=0</div>
+        </div>
+
+        <div class="label-action-row mt-3">
+          <button id="btn-copy-label-url" class="btn btn-secondary">
+            <span>📋 URLコピー</span>
+          </button>
+          <button id="btn-download-label-qr" class="btn btn-secondary">
+            <span>💾 画像を保存 (PNG)</span>
+          </button>
+          <button id="btn-print-label" class="btn btn-secondary">
+            <span>🖨️ 印刷</span>
+          </button>
+        </div>
+
+        <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 16px 0;">
+
+        <!-- NFCタグ書き込みセクション -->
+        <div class="nfc-write-section">
+          <h4>📲 NFCタグへ書き込み</h4>
+          <p class="text-sub">NFCタグ（シールやカード）にこのアイテムのURLを直接書き込みます。</p>
+          
+          <div id="nfc-write-supported-box">
+            <button id="btn-write-nfc" class="btn btn-primary mt-2" style="width: 100%;">
+              <span>NFCタグにかざして書き込む</span>
+            </button>
+            <div id="nfc-write-status" class="nfc-status-box hidden mt-2">
+              <span class="nfc-pulse-icon">📡</span>
+              <span id="nfc-status-msg">スマートフォンの背面にNFCタグをかざしてください...</span>
+              <button id="btn-cancel-nfc" class="btn-text mt-1" style="color: var(--text-muted);">キャンセル</button>
+            </div>
+          </div>
+
+          <div id="nfc-write-unsupported-box" class="nfc-unsupported-note hidden mt-2">
+            <p class="text-sub">⚠️ お使いの環境（iOS Safari / PCなど）はブラウザからのNFC書き込みに対応していません。</p>
+            <p class="text-sub">上記の「URLコピー」を使い、無料アプリ「<strong>NFC Tools</strong>」等でタグに書き込んでください。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- スクリプトのエントリーポイント -->
   <script type="module" src="js/app.js"></script>
 </body>
