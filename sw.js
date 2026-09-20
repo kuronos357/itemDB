@@ -3,10 +3,9 @@
  * アプリケーションシェルのオフラインキャッシュ
  */
 
-const CACHE_NAME = 'itemdb-cache-v14';
+const CACHE_NAME = 'itemdb-cache-v15';
 const ASSETS_TO_CACHE = [
   './',
-  './index.html',
   './style.css',
   './manifest.json',
   './icons/icon.svg',
@@ -17,6 +16,22 @@ const ASSETS_TO_CACHE = [
   './js/audio.js',
   './js/ui.js'
 ];
+
+/**
+ * Safari (WebKit) の "Response served by service worker has redirections" エラー対策
+ * redirected === true のレスポンスをそのまま返すとWebKitがセキュリティ例外を発生させるため、
+ * 新しい Response オブジェクトとして再構築してクリーンなレスポンスを返却する。
+ */
+function cleanResponse(response) {
+  if (!response || !response.redirected) {
+    return response;
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers
+  });
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -45,30 +60,45 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // ナビゲーションリクエスト（HTMLページのトップレベル表示）
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      caches.match('./').then((cachedResponse) => {
+        if (cachedResponse) {
+          return cleanResponse(cachedResponse);
+        }
+        return fetch(event.request).then((networkResponse) => {
+          return cleanResponse(networkResponse);
+        }).catch(() => caches.match('./').then(cleanResponse));
+      })
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
-        return cachedResponse;
+        return cleanResponse(cachedResponse);
       }
 
-      // /index.html または ルート(/) へのリクエスト時のフォールバック
+      // /index.html へのリクエスト時のフォールバック
       const url = new URL(event.request.url);
       if (url.pathname.endsWith('/index.html')) {
         return caches.match('./').then((rootResponse) => {
-          if (rootResponse) return rootResponse;
-          return fetch(event.request);
+          if (rootResponse) return cleanResponse(rootResponse);
+          return fetch(event.request).then(cleanResponse);
         });
       }
 
       return fetch(event.request).then((networkResponse) => {
         if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
-          return networkResponse;
+          return cleanResponse(networkResponse);
         }
-        const responseToCache = networkResponse.clone();
+        const responseToCache = cleanResponse(networkResponse.clone());
         caches.open(CACHE_NAME).then((cache) => {
           cache.put(event.request, responseToCache);
         });
-        return networkResponse;
+        return cleanResponse(networkResponse);
       });
     })
   );
