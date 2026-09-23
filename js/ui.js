@@ -538,14 +538,10 @@ class UIManager {
     const modal = document.getElementById('settings-modal');
     if (!modal) return;
 
-    const { apiKey, dbId, proxyMode, customProxyUrl } = state.config;
+    const { apiKey, dbId } = state.config;
 
     document.getElementById('input-api-key').value = apiKey || '';
     document.getElementById('input-db-id').value = dbId || '';
-    document.getElementById('select-proxy-mode').value = proxyMode || 'auto';
-    document.getElementById('input-custom-proxy').value = customProxyUrl || '';
-
-    this._updateProxyInputVisibility();
 
     const detectedEl = document.getElementById('detected-db-id');
     if (detectedEl) {
@@ -560,18 +556,6 @@ class UIManager {
     }
 
     modal.classList.remove('hidden');
-  }
-
-  _updateProxyInputVisibility() {
-    const mode = document.getElementById('select-proxy-mode')?.value;
-    const customGroup = document.getElementById('custom-proxy-group');
-    if (customGroup) {
-      if (mode === 'custom') {
-        customGroup.classList.remove('hidden');
-      } else {
-        customGroup.classList.add('hidden');
-      }
-    }
   }
 
   setLoading(isLoading, text = '処理中...') {

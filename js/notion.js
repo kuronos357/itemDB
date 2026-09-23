@@ -82,14 +82,8 @@ export class NotionClient {
       return `https://corsproxy.io/?url=${encodeURIComponent(notionDirectUrl)}`;
     }
 
-    // 'auto' 判定
-    // 1. Cloudflare Pages 上 (pages.dev) で動いている場合は /api/ を使用
-    if (window.location.hostname.endsWith('pages.dev')) {
-      return `/api/${cleanEndpoint}`;
-    }
-
-    // 2. それ以外（GitHub Pages や workers.dev、ローカル環境等）は corsproxy.io をフォールバック利用
-    return `https://corsproxy.io/?url=${encodeURIComponent(notionDirectUrl)}`;
+    // デフォルト: Cloudflare Pages Functions (/api/...)
+    return `/api/${cleanEndpoint}`;
   }
 
   _getHeaders() {

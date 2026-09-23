@@ -89,10 +89,6 @@ class Application {
       this._testConnection();
     });
 
-    document.getElementById('select-proxy-mode')?.addEventListener('change', () => {
-      ui._updateProxyInputVisibility();
-    });
-
     // データベースURL/ID入力時のリアルタイム抽出表示
     document.getElementById('input-db-id')?.addEventListener('input', (e) => {
       const val = e.target.value.trim();
@@ -717,10 +713,8 @@ class Application {
   _saveSettingsFromModal() {
     const apiKey = document.getElementById('input-api-key')?.value.trim();
     const dbId = document.getElementById('input-db-id')?.value.trim();
-    const proxyMode = document.getElementById('select-proxy-mode')?.value;
-    const customProxyUrl = document.getElementById('input-custom-proxy')?.value.trim();
 
-    state.saveConfig({ apiKey, dbId, proxyMode, customProxyUrl });
+    state.saveConfig({ apiKey, dbId, proxyMode: 'cloudflare' });
     if (apiKey && dbId) {
       notion.resolveDatabases(dbId).catch(() => {});
     }
@@ -747,10 +741,8 @@ class Application {
 
     const apiKey = document.getElementById('input-api-key')?.value.trim();
     const dbId = document.getElementById('input-db-id')?.value.trim();
-    const proxyMode = document.getElementById('select-proxy-mode')?.value;
-    const customProxyUrl = document.getElementById('input-custom-proxy')?.value.trim();
 
-    state.saveConfig({ apiKey, dbId, proxyMode, customProxyUrl });
+    state.saveConfig({ apiKey, dbId, proxyMode: 'cloudflare' });
 
     try {
       const info = await notion.testConnection();

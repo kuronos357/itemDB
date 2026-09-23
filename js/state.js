@@ -43,7 +43,7 @@ class StateStore extends EventTarget {
       locationDbId: localStorage.getItem(STORAGE_KEYS.NOTION_LOCATION_DB_ID) || '',
       itemDbTitle: '',
       locationDbTitle: '',
-      proxyMode: localStorage.getItem(STORAGE_KEYS.NOTION_PROXY_MODE) || 'auto',
+      proxyMode: localStorage.getItem(STORAGE_KEYS.NOTION_PROXY_MODE) || 'cloudflare',
       customProxyUrl: localStorage.getItem(STORAGE_KEYS.CUSTOM_PROXY_URL) || '',
       propMapping: this._loadPropMapping()
     };

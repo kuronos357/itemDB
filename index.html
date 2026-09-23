@@ -106,23 +106,6 @@
           <span id="detected-db-id" class="text-sub">物品DBまたは場所DBのURLを貼り付けると、リレーションからもう片方のDBも自動判別・連携されます。</span>
         </div>
 
-        <div class="form-group">
-          <label for="select-proxy-mode">通信・CORSプロキシ方式</label>
-          <select id="select-proxy-mode" class="form-select">
-            <option value="auto">自動判別 (Cloudflare Pagesなら/api、他はCORSプロキシ)</option>
-            <option value="cloudflare">Cloudflare Pages Functions (/api/...)</option>
-            <option value="corsproxy">CORS Proxy (corsproxy.io)</option>
-            <option value="custom">カスタムプロキシURL</option>
-            <option value="direct">ダイレクト (CORS無効ブラウザ・拡張機能用)</option>
-          </select>
-          <span class="text-sub">ブラウザからNotion APIを呼ぶためのCORS回避方法です。</span>
-        </div>
-
-        <div id="custom-proxy-group" class="form-group hidden">
-          <label for="input-custom-proxy">カスタムプロキシベースURL</label>
-          <input type="text" id="input-custom-proxy" class="form-input" placeholder="https://my-proxy.workers.dev">
-        </div>
-
         <div class="form-group mt-2">
           <button id="btn-test-connection" class="btn btn-secondary">
             <span>疎通テストを実行</span>
