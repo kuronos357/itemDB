@@ -43,6 +43,23 @@ class ScannerService extends EventTarget {
    *  - https://example.com/i/1234, /l/1234
    *  - 1234 (純粋な数字文字列)
    */
+  _extractIdFromUrl(str) {
+    if (!str || typeof str !== 'string') return null;
+    const clean = str.trim();
+    if (!clean.includes('://') && !clean.includes('?id=') && !clean.includes('&id=')) {
+      return null;
+    }
+    try {
+      const url = new URL(clean, window.location.origin);
+      const queryId = url.searchParams.get('id');
+      if (queryId && /^\d+$/.test(queryId)) {
+        return queryId;
+      }
+    } catch {}
+    const match = clean.match(/[?&]id=(\d+)(?:[&#]|$)/);
+    return match ? match[1] : null;
+  }
+
   parseInputToId(raw) {
     if (!raw) return null;
     const str = String(raw).trim();
@@ -122,26 +139,14 @@ class ScannerService extends EventTarget {
     }
 
     try {
-      const formatsToSupport = window.Html5QrcodeSupportedFormats ? [
-        window.Html5QrcodeSupportedFormats.QR_CODE,
-        window.Html5QrcodeSupportedFormats.EAN_13,
-        window.Html5QrcodeSupportedFormats.EAN_8,
-        window.Html5QrcodeSupportedFormats.UPC_A,
-        window.Html5QrcodeSupportedFormats.UPC_E,
-        window.Html5QrcodeSupportedFormats.CODE_128
-      ] : undefined;
-
-      this.html5QrCode = new window.Html5Qrcode(
-        elementId,
-        formatsToSupport ? { formatsToSupport, verbose: false } : false
-      );
+      this.html5QrCode = new window.Html5Qrcode(elementId);
 
       const config = {
         fps: 15,
         qrbox: (viewfinderWidth, viewfinderHeight) => {
-          const width = Math.min(viewfinderWidth * 0.85, 320);
-          const height = Math.min(viewfinderHeight * 0.6, 220);
-          return { width: Math.floor(width), height: Math.floor(height) };
+          const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+          const edge = Math.floor(minEdge * 0.75);
+          return { width: edge, height: edge };
         },
         aspectRatio: 1.0,
         experimentalFeatures: {
@@ -200,13 +205,28 @@ class ScannerService extends EventTarget {
     this.lastScannedText = decodedText;
     this.lastScannedTime = now;
 
-    // 設定用QRコード（URL、APIキー、DB ID、JSON等）の検知
+    // 1. 設定用QRコード（URL、APIキー、DB ID、JSON等）の検知
     if (this._checkSetupConfig(decodedText)) {
       feedback.playScan();
       return;
     }
 
-    // バーコード（JAN/ISBNコード）の検知 (8桁, 12桁, 13桁, 10桁ISBN等)
+    // 2. itemDB アイテムURL (例: https://.../?id=1234 または /item/1234)
+    //    URLに明示的に id パラメータが含まれている場合は最優先でIDとして認識
+    const idFromUrl = this._extractIdFromUrl(decodedText);
+    if (idFromUrl) {
+      feedback.playScan();
+      this.dispatchEvent(new CustomEvent('scan-success', {
+        detail: {
+          raw: decodedText,
+          id: idFromUrl,
+          parsedId: state.constructor.parseId(idFromUrl)
+        }
+      }));
+      return;
+    }
+
+    // 3. バーコード（JAN/ISBNコード）の検知 (8桁, 12桁, 13桁, 10桁ISBN等)
     if (BarcodeService.isBarcode(decodedText)) {
       feedback.playScan();
       this.dispatchEvent(new CustomEvent('barcode-scanned', {
@@ -218,6 +238,7 @@ class ScannerService extends EventTarget {
       return;
     }
 
+    // 4. その他のID（純粋な数字IDなど）
     const id = this.parseInputToId(decodedText);
     if (!id) {
       feedback.playError();
