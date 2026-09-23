@@ -561,6 +561,104 @@ export class NotionClient {
   }
 
   /**
+   * バーコード（JAN/ISBNコード）に一致する既存レコードを検索
+   * 「詳細」「メモ」「名前」等に含まれるかを検索します
+   */
+  async findRecordByBarcode(code) {
+    const cleanCode = String(code).replace(/[-\s]/g, '').trim();
+    if (!cleanCode) return null;
+
+    const targetDbId = state.config.itemDbId || state.config.dbId;
+    if (!targetDbId) return null;
+
+    let schema = null;
+    try {
+      schema = await this.getDatabaseSchema(targetDbId);
+    } catch {}
+    const props = schema?.properties || {};
+
+    const filterOrs = [];
+
+    // 1. 詳細プロパティ (rich_text)
+    const detailsProp = props['詳細'] || Object.values(props).find(p => p.type === 'rich_text' && p.name === '詳細');
+    if (detailsProp) {
+      filterOrs.push({
+        property: detailsProp.name,
+        rich_text: { contains: cleanCode }
+      });
+    }
+
+    // 2. メモ・備考プロパティ (rich_text)
+    const notesProp = props[state.config.propMapping.notes] || props['メモ'] || props['備考'];
+    if (notesProp && notesProp.name !== detailsProp?.name && notesProp.type === 'rich_text') {
+      filterOrs.push({
+        property: notesProp.name,
+        rich_text: { contains: cleanCode }
+      });
+    }
+
+    // 3. タイトルプロパティ
+    const titleProp = props[state.config.propMapping.title] || Object.values(props).find(p => p.type === 'title');
+    if (titleProp) {
+      filterOrs.push({
+        property: titleProp.name,
+        title: { contains: cleanCode }
+      });
+    }
+
+    if (filterOrs.length === 0) return null;
+
+    const filter = filterOrs.length === 1 ? filterOrs[0] : { or: filterOrs };
+
+    const executeQuery = async () => {
+      try {
+        return await this._request(`data_sources/${targetDbId}/query`, {
+          method: 'POST',
+          body: JSON.stringify({ filter, page_size: 1 })
+        });
+      } catch (err) {
+        if (err.status === 404 || err.message?.includes('404')) {
+          return await this._request(`databases/${targetDbId}/query`, {
+            method: 'POST',
+            body: JSON.stringify({ filter, page_size: 1 })
+          });
+        }
+        throw err;
+      }
+    };
+
+    try {
+      const res = await executeQuery();
+      if (res?.results && res.results.length > 0) {
+        return this._normalizeRecord(res.results[0]);
+      }
+    } catch (e) {
+      console.warn('[NotionClient] findRecordByBarcode query error:', e);
+    }
+
+    return null;
+  }
+
+  /**
+   * データベースの「属性」マルチセレクト選択肢一覧を取得（Jev AI分類の候補選択肢等に活用）
+   */
+  async getAttributeOptions(targetDbId = null) {
+    const id = targetDbId || state.config.itemDbId || state.config.dbId;
+    if (!id) return [];
+    try {
+      const schema = await this.getDatabaseSchema(id);
+      const props = schema?.properties || {};
+      const attrProp = props['属性'] || Object.values(props).find(p => p.type === 'multi_select');
+      if (attrProp?.multi_select?.options) {
+        return attrProp.multi_select.options.map(opt => opt.name);
+      }
+    } catch (e) {
+      console.warn('[NotionClient] Failed to fetch attribute options:', e);
+    }
+    return [];
+  }
+
+  /**
    * 単一ページ（Page）の取得
    */
   async fetchPage(pageId) {
@@ -843,15 +941,24 @@ export class NotionClient {
   /**
    * 新しい物品または場所レコードを作成 (data_source_id / database_id 両対応)
    */
-  async createRecord({ numericId, name, isItem, locationPageId = null }) {
+  async createRecord({
+    numericId = null,
+    name,
+    isItem = true,
+    locationPageId = null,
+    details = '',
+    attributes = [],
+    isAutoRegistered = false,
+    coverUrl = null
+  }) {
     const targetDbId = isItem
       ? (state.config.itemDbId || state.config.dbId)
       : (state.config.locationDbId || state.config.dbId);
 
     if (!targetDbId) throw new Error('作成先データベースが未設定です。');
 
-    const idNum = Number(numericId);
-    const idStr = String(numericId);
+    const idNum = numericId != null ? Number(numericId) : null;
+    const idStr = numericId != null ? String(numericId) : '';
 
     let schema = null;
     try {
@@ -879,19 +986,22 @@ export class NotionClient {
       }
     }
 
+    const defaultTitle = name || (numericId != null ? `${isItem ? '物品' : '場所'} ${numericId}` : '新規アイテム');
     const properties = {
       [titlePropName]: {
         title: [
-          { text: { content: name || `${isItem ? '物品' : '場所'} ${numericId}` } }
+          { text: { content: defaultTitle } }
         ]
       }
     };
 
-    // IDの設定
-    if (idPropType === 'number') {
-      properties[idPropName] = { number: idNum };
-    } else if (idPropType === 'rich_text') {
-      properties[idPropName] = { rich_text: [{ text: { content: idStr } }] };
+    // IDの設定 (numericId が指定されている場合のみ設定。null時はNotion側自動採番に任せる)
+    if (numericId !== null && numericId !== undefined && numericId !== '') {
+      if (idPropType === 'number') {
+        properties[idPropName] = { number: idNum };
+      } else if (idPropType === 'rich_text') {
+        properties[idPropName] = { rich_text: [{ text: { content: idStr } }] };
+      }
     }
 
     // 3. 種別 (Type) プロパティが存在する場合のみ設定
@@ -924,9 +1034,55 @@ export class NotionClient {
       }
     }
 
-    // 5. アクティブ (checkbox) が存在する場合は true に設定（物品のみ）
+    // 5. 詳細 (Rich Text) プロパティ
+    if (details) {
+      const detailsProp = props['詳細']
+        || Object.values(props).find(p => p.name === '詳細' && p.type === 'rich_text')
+        || (props[state.config.propMapping.notes]?.type === 'rich_text' ? props[state.config.propMapping.notes] : null);
+      if (detailsProp) {
+        properties[detailsProp.name] = {
+          rich_text: [{ text: { content: details } }]
+        };
+      }
+    }
+
+    // 6. 属性 (Multi-select) プロパティ
+    if (attributes && attributes.length > 0) {
+      const attrProp = props['属性']
+        || Object.values(props).find(p => p.name === '属性' && p.type === 'multi_select')
+        || Object.values(props).find(p => p.type === 'multi_select');
+      if (attrProp) {
+        properties[attrProp.name] = {
+          multi_select: attributes.map(tag => ({ name: String(tag).trim() })).filter(t => t.name)
+        };
+      }
+    }
+
+    // 7. 自動登録未確認 (Checkbox) プロパティ
+    if (isAutoRegistered) {
+      const autoProp = props['自動登録未確認']
+        || Object.values(props).find(p => p.name.includes('自動登録') && p.type === 'checkbox');
+      if (autoProp) {
+        properties[autoProp.name] = { checkbox: true };
+      }
+    }
+
+    // 8. アクティブ (checkbox) が存在する場合は true に設定（物品のみ）
     if (isItem && props['アクティブ']?.type === 'checkbox') {
       properties['アクティブ'] = { checkbox: true };
+    }
+
+    // リクエストボディ構築 (カバー画像対応)
+    const requestBody = {
+      parent: { data_source_id: targetDbId },
+      properties
+    };
+
+    if (coverUrl) {
+      requestBody.cover = {
+        type: 'external',
+        external: { url: coverUrl }
+      };
     }
 
     // 2025-09-03 では data_source_id または database_id で親を指定
@@ -934,19 +1090,14 @@ export class NotionClient {
     try {
       res = await this._request(`pages`, {
         method: 'POST',
-        body: JSON.stringify({
-          parent: { data_source_id: targetDbId },
-          properties
-        })
+        body: JSON.stringify(requestBody)
       });
     } catch (err) {
       if (err.status === 400 || err.status === 404 || err.message?.includes('data_source_id')) {
+        requestBody.parent = { database_id: targetDbId };
         res = await this._request(`pages`, {
           method: 'POST',
-          body: JSON.stringify({
-            parent: { database_id: targetDbId },
-            properties
-          })
+          body: JSON.stringify(requestBody)
         });
       } else {
         throw err;
@@ -1074,6 +1225,16 @@ export class NotionClient {
       notesVal = attributes.join(' / ');
     }
 
+    // カバー画像 (cover) の抽出
+    let coverUrl = null;
+    if (page.cover) {
+      if (page.cover.type === 'external' && page.cover.external?.url) {
+        coverUrl = page.cover.external.url;
+      } else if (page.cover.type === 'file' && page.cover.file?.url) {
+        coverUrl = page.cover.file.url;
+      }
+    }
+
     return {
       pageId: page.id,
       id: idVal,
@@ -1086,6 +1247,7 @@ export class NotionClient {
       notes: notesVal,
       attributes,
       isActive,
+      coverUrl,
       url: page.url,
       rawProperties: props
     };

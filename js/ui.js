@@ -97,6 +97,14 @@ class UIManager {
         }
       });
     }
+
+    // バーコード登録モーダルの閉じるボタン
+    document.getElementById('btn-close-barcode-modal')?.addEventListener('click', () => {
+      this.closeBarcodeModal();
+    });
+    document.getElementById('btn-cancel-barcode')?.addEventListener('click', () => {
+      this.closeBarcodeModal();
+    });
   }
 
   showToast(message, type = 'info', duration = 3000) {
@@ -542,6 +550,14 @@ class UIManager {
 
     document.getElementById('input-api-key').value = apiKey || '';
     document.getElementById('input-db-id').value = dbId || '';
+    const jevInput = document.getElementById('input-jev-api-key');
+    if (jevInput) {
+      jevInput.value = state.config.jevApiKey || '';
+    }
+    const jevMaxInput = document.getElementById('input-jev-max-attributes');
+    if (jevMaxInput) {
+      jevMaxInput.value = state.config.jevMaxAttributes || 3;
+    }
 
     const detectedEl = document.getElementById('detected-db-id');
     if (detectedEl) {
@@ -686,6 +702,8 @@ class UIManager {
       if (cfg.itemDbId || cfg.dbId) url.searchParams.set('dbid', cfg.itemDbId || cfg.dbId);
       if (cfg.locationDbId) url.searchParams.set('locid', cfg.locationDbId);
       if (cfg.proxyMode) url.searchParams.set('proxy', cfg.proxyMode);
+      if (cfg.jevApiKey) url.searchParams.set('jev', cfg.jevApiKey);
+      if (cfg.jevMaxAttributes) url.searchParams.set('jevmax', String(cfg.jevMaxAttributes));
     }
     return url.toString();
   }
@@ -858,6 +876,107 @@ class UIManager {
     const writeBtn = document.getElementById('btn-write-nfc');
     if (statusBox) statusBox.classList.add('hidden');
     if (writeBtn) writeBtn.disabled = false;
+  }
+
+  /**
+   * バーコード新規登録プレビューモーダルの表示
+   */
+  renderBarcodeModal(itemData, duplicateRecord = null, locationList = [], defaultLocationPageId = null, onRegisterCallback = null) {
+    const modal = document.getElementById('barcode-modal');
+    if (!modal) return;
+
+    this.barcodeRegisterCallback = onRegisterCallback;
+
+    const iconEl = document.getElementById('barcode-modal-icon');
+    const titleEl = document.getElementById('barcode-modal-title');
+    const warnEl = document.getElementById('barcode-duplicate-warning');
+    const warnInfoEl = document.getElementById('barcode-duplicate-item-info');
+    const coverWrapper = document.getElementById('barcode-cover-wrapper');
+    const coverImg = document.getElementById('barcode-cover-img');
+    const titleInput = document.getElementById('barcode-item-title');
+    const attrInput = document.getElementById('barcode-item-attr');
+    const detailsInput = document.getElementById('barcode-item-details');
+    const locSelect = document.getElementById('barcode-item-location');
+
+    // アイコン・タイトル
+    if (iconEl) iconEl.textContent = itemData.isIsbn ? '📚' : '📦';
+    if (titleEl) titleEl.textContent = itemData.isIsbn ? '書籍バーコード新規登録 (ISBN)' : '商品バーコード新規登録 (JAN)';
+
+    // 重複警告
+    if (warnEl && warnInfoEl) {
+      if (duplicateRecord) {
+        warnEl.classList.remove('hidden');
+        warnInfoEl.textContent = `すでに Notion 内に「${duplicateRecord.name}」(ID: #${duplicateRecord.id}) が存在します。`;
+      } else {
+        warnEl.classList.add('hidden');
+      }
+    }
+
+    // カバー画像
+    if (coverWrapper && coverImg) {
+      if (itemData.coverUrl) {
+        coverImg.src = itemData.coverUrl;
+        coverWrapper.classList.remove('hidden');
+      } else {
+        coverImg.src = '';
+        coverWrapper.classList.add('hidden');
+      }
+    }
+
+    // フォーム初期値
+    if (titleInput) titleInput.value = itemData.title || '';
+    if (attrInput) attrInput.value = (itemData.attributes || []).join(', ');
+    if (detailsInput) detailsInput.value = itemData.details || '';
+
+    // 保管場所セレクトボックス
+    if (locSelect) {
+      locSelect.innerHTML = '<option value="">(未設定)</option>';
+      for (const loc of locationList) {
+        const opt = document.createElement('option');
+        opt.value = loc.pageId;
+        opt.textContent = `${loc.name} (#${loc.id})`;
+        if (defaultLocationPageId && (loc.pageId === defaultLocationPageId || String(loc.id) === String(defaultLocationPageId))) {
+          opt.selected = true;
+        }
+        locSelect.appendChild(opt);
+      }
+    }
+
+    // 登録ボタンのハンドラ配線
+    const submitBtn = document.getElementById('btn-submit-barcode');
+    if (submitBtn) {
+      submitBtn.onclick = () => {
+        const editedTitle = titleInput?.value.trim() || itemData.title;
+        const rawAttr = attrInput?.value.trim() || '';
+        const editedAttrs = rawAttr
+          ? rawAttr.split(/[,、\s]+/).map(s => s.trim()).filter(Boolean)
+          : (itemData.attributes || []);
+        const editedDetails = detailsInput?.value.trim() || itemData.details || '';
+        const selectedLocId = locSelect?.value || null;
+
+        this.closeBarcodeModal();
+
+        if (this.barcodeRegisterCallback) {
+          this.barcodeRegisterCallback({
+            code: itemData.code,
+            isIsbn: itemData.isIsbn,
+            title: editedTitle,
+            attributes: editedAttrs,
+            details: editedDetails,
+            locationPageId: selectedLocId,
+            coverUrl: itemData.coverUrl || null
+          });
+        }
+      };
+    }
+
+    modal.classList.remove('hidden');
+  }
+
+  closeBarcodeModal() {
+    const modal = document.getElementById('barcode-modal');
+    if (modal) modal.classList.add('hidden');
+    this.barcodeRegisterCallback = null;
   }
 }
 

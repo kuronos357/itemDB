@@ -10,6 +10,7 @@ import { notion } from './notion.js';
 import { scanner } from './scanner.js';
 import { feedback } from './audio.js';
 import { ui } from './ui.js';
+import { BarcodeService } from './barcode.js';
 
 class Application {
   constructor() {
@@ -52,6 +53,10 @@ class Application {
     // スキャナーイベント
     scanner.addEventListener('scan-success', (e) => {
       this.onIdScanned(e.detail.id);
+    });
+
+    scanner.addEventListener('barcode-scanned', (e) => {
+      this.onBarcodeScanned(e.detail.code);
     });
 
     scanner.addEventListener('setup-config-scanned', (e) => {
@@ -228,15 +233,19 @@ class Application {
     const api = params.get('api') || params.get('apiKey') || params.get('api_key') || params.get('key') || params.get('token') || params.get('secret');
     const locid = params.get('locationDbId') || params.get('locid') || params.get('location_db_id') || params.get('locationdb');
     const proxy = params.get('proxy') || params.get('proxyMode');
+    const jev = params.get('jev') || params.get('jevApiKey') || params.get('jev_api_key');
+    const jevMax = params.get('jevmax') || params.get('jev_max') || params.get('jevMax');
     const id = params.get('id');
 
-    if (dbid || api) {
+    if (dbid || api || jev || jevMax) {
       const hasDirectId = (id && /^\d+$/.test(id));
       await this._applySetupConfig({
         dbId: dbid,
         apiKey: api,
         locationDbId: locid,
-        proxyMode: proxy
+        proxyMode: proxy,
+        jevApiKey: jev,
+        jevMaxAttributes: jevMax ? parseInt(jevMax, 10) : undefined
       }, null, !hasDirectId);
 
       // URLから秘密トークンを除去
@@ -278,6 +287,8 @@ class Application {
     if (config.locationDbId) updates.locationDbId = config.locationDbId;
     if (config.proxyMode) updates.proxyMode = config.proxyMode;
     if (config.customProxyUrl) updates.customProxyUrl = config.customProxyUrl;
+    if (config.jevApiKey) updates.jevApiKey = config.jevApiKey;
+    if (config.jevMaxAttributes !== undefined) updates.jevMaxAttributes = config.jevMaxAttributes;
 
     state.saveConfig(updates);
 
@@ -472,6 +483,123 @@ class Application {
     } catch (err) {
       ui.showToast(`取得エラー: ${err.message}`, 'error');
       feedback.playError();
+    } finally {
+      ui.setLoading(false);
+    }
+  }
+
+  /**
+   * バーコード（JAN/ISBN）スキャン時のハンドラ
+   */
+  async onBarcodeScanned(code) {
+    if (!state.isConfigured()) {
+      ui.showToast('Notionの設定を先に行ってください', 'warning');
+      ui.renderSettingsModal();
+      return;
+    }
+
+    ui.setLoading(true, 'バーコード情報を検索中...');
+
+    try {
+      // 1. Notion既存アイテムの重複チェック
+      const existingRecord = await notion.findRecordByBarcode(code);
+
+      // 2. 既存の属性オプション（Notion DBの属性選択肢）を取得
+      const candidateAttributes = await notion.getAttributeOptions();
+
+      // 3. openBD (ISBN) または Open Food Facts / Jev (JAN) による情報取得
+      const itemData = await BarcodeService.lookup(code, {
+        jevApiKey: state.config.jevApiKey,
+        jevMaxAttributes: state.config.jevMaxAttributes,
+        candidateAttributes
+      });
+
+      // 4. 保管場所の選択肢リスト取得（直近の場所や親・子・履歴の場所）
+      const locationList = [];
+      const addedLocIds = new Set();
+
+      const addLoc = (loc) => {
+        if (!loc || !loc.pageId || addedLocIds.has(loc.pageId)) return;
+        addedLocIds.add(loc.pageId);
+        locationList.push(loc);
+      };
+
+      if (state.currentLocation) addLoc(state.currentLocation);
+      if (state.parentLocation) addLoc(state.parentLocation);
+      if (state.subLocations) {
+        for (const sub of state.subLocations) addLoc(sub);
+      }
+      for (const h of state.history) {
+        if (h.type === 'location' && h.pageId) {
+          addLoc(h);
+        }
+      }
+
+      // デフォルトの場所（現在地があればそれ）
+      const defaultLocId = state.currentLocation?.pageId || null;
+
+      ui.setLoading(false);
+
+      // 5. プレビュー確認モーダル表示
+      ui.renderBarcodeModal(
+        itemData,
+        existingRecord,
+        locationList,
+        defaultLocId,
+        async (formData) => {
+          await this._registerBarcodeItem(formData);
+        }
+      );
+    } catch (err) {
+      ui.setLoading(false);
+      ui.showToast(`バーコード検索エラー: ${err.message}`, 'error');
+      feedback.playError();
+    }
+  }
+
+  /**
+   * バーコード新規アイテムのNotionへの登録処理
+   */
+  async _registerBarcodeItem(formData) {
+    ui.setLoading(true, 'Notionにアイテムを登録中...');
+
+    try {
+      const record = await notion.createRecord({
+        numericId: null, // Notion側で自動採番
+        name: formData.title,
+        isItem: true,
+        locationPageId: formData.locationPageId || null,
+        details: formData.details,
+        attributes: formData.attributes,
+        isAutoRegistered: true,
+        coverUrl: formData.coverUrl
+      });
+
+      feedback.playSuccess();
+      ui.showToast(`「${record.name}」をNotionに登録しました！`, 'success', 3500);
+
+      // 履歴に追加
+      state.addHistory({
+        id: record.id != null ? record.id : record.pageId.slice(0, 8),
+        name: record.name,
+        type: 'item',
+        pageId: record.pageId,
+        timestamp: Date.now()
+      });
+
+      // もし現在場所画面を開いていて、その場所に登録した場合はリスト更新
+      if (state.currentMode === AppMode.LOCATION_VIEW && state.currentLocation) {
+        if (formData.locationPageId === state.currentLocation.pageId) {
+          state.locationItems.unshift(record);
+          ui.renderLocationView(state.currentLocation, state.locationItems, state.subLocations, state.parentLocation);
+        }
+      } else if (state.currentMode === AppMode.HOME) {
+        // ホーム画面の履歴等を再描画
+        ui.renderHomeView();
+      }
+    } catch (err) {
+      feedback.playError();
+      ui.showToast(`Notion登録エラー: ${err.message}`, 'error');
     } finally {
       ui.setLoading(false);
     }
@@ -715,8 +843,11 @@ class Application {
   _saveSettingsFromModal() {
     const apiKey = document.getElementById('input-api-key')?.value.trim();
     const dbId = document.getElementById('input-db-id')?.value.trim();
+    const jevApiKey = document.getElementById('input-jev-api-key')?.value.trim();
+    const jevMaxRaw = document.getElementById('input-jev-max-attributes')?.value;
+    const jevMaxAttributes = jevMaxRaw ? Math.max(1, parseInt(jevMaxRaw, 10) || 3) : 3;
 
-    state.saveConfig({ apiKey, dbId, proxyMode: 'cloudflare' });
+    state.saveConfig({ apiKey, dbId, jevApiKey, jevMaxAttributes, proxyMode: 'cloudflare' });
     if (apiKey && dbId) {
       notion.resolveDatabases(dbId).catch(() => {});
     }
@@ -743,8 +874,11 @@ class Application {
 
     const apiKey = document.getElementById('input-api-key')?.value.trim();
     const dbId = document.getElementById('input-db-id')?.value.trim();
+    const jevApiKey = document.getElementById('input-jev-api-key')?.value.trim();
+    const jevMaxRaw = document.getElementById('input-jev-max-attributes')?.value;
+    const jevMaxAttributes = jevMaxRaw ? Math.max(1, parseInt(jevMaxRaw, 10) || 3) : 3;
 
-    state.saveConfig({ apiKey, dbId, proxyMode: 'cloudflare' });
+    state.saveConfig({ apiKey, dbId, jevApiKey, jevMaxAttributes, proxyMode: 'cloudflare' });
 
     try {
       const info = await notion.testConnection();
@@ -777,7 +911,7 @@ class Application {
    * 別端末（スマホやWatch）セットアップ用のQRコードを生成
    */
   _generateSetupQr() {
-    const { dbId, apiKey, itemDbId, locationDbId } = state.config;
+    const { dbId, apiKey, itemDbId, locationDbId, jevApiKey, jevMaxAttributes } = state.config;
     const effectiveDbId = dbId || itemDbId;
     if (!effectiveDbId || !apiKey) {
       ui.showToast('先にAPIキーとデータベースIDを入力してください', 'warning');
@@ -790,6 +924,12 @@ class Application {
     }
     if (locationDbId) {
       targetUrl += `&locid=${encodeURIComponent(locationDbId)}`;
+    }
+    if (jevApiKey) {
+      targetUrl += `&jev=${encodeURIComponent(jevApiKey)}`;
+    }
+    if (jevMaxAttributes) {
+      targetUrl += `&jevmax=${encodeURIComponent(jevMaxAttributes)}`;
     }
     const qrContainer = document.getElementById('setup-qr-preview');
     if (!qrContainer) return;

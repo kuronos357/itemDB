@@ -9,6 +9,7 @@
 import { state } from './state.js';
 import { feedback } from './audio.js';
 import { NotionClient } from './notion.js';
+import { BarcodeService } from './barcode.js';
 
 class ScannerService extends EventTarget {
   constructor() {
@@ -121,13 +122,26 @@ class ScannerService extends EventTarget {
     }
 
     try {
-      this.html5QrCode = new window.Html5Qrcode(elementId);
+      const formatsToSupport = window.Html5QrcodeSupportedFormats ? [
+        window.Html5QrcodeSupportedFormats.QR_CODE,
+        window.Html5QrcodeSupportedFormats.EAN_13,
+        window.Html5QrcodeSupportedFormats.EAN_8,
+        window.Html5QrcodeSupportedFormats.UPC_A,
+        window.Html5QrcodeSupportedFormats.UPC_E,
+        window.Html5QrcodeSupportedFormats.CODE_128
+      ] : undefined;
+
+      this.html5QrCode = new window.Html5Qrcode(
+        elementId,
+        formatsToSupport ? { formatsToSupport, verbose: false } : false
+      );
+
       const config = {
         fps: 15,
         qrbox: (viewfinderWidth, viewfinderHeight) => {
-          const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-          const edge = Math.floor(minEdge * 0.75);
-          return { width: edge, height: edge };
+          const width = Math.min(viewfinderWidth * 0.85, 320);
+          const height = Math.min(viewfinderHeight * 0.6, 220);
+          return { width: Math.floor(width), height: Math.floor(height) };
         },
         aspectRatio: 1.0,
         experimentalFeatures: {
@@ -192,6 +206,18 @@ class ScannerService extends EventTarget {
       return;
     }
 
+    // バーコード（JAN/ISBNコード）の検知 (8桁, 12桁, 13桁, 10桁ISBN等)
+    if (BarcodeService.isBarcode(decodedText)) {
+      feedback.playScan();
+      this.dispatchEvent(new CustomEvent('barcode-scanned', {
+        detail: {
+          code: decodedText.trim(),
+          raw: decodedText
+        }
+      }));
+      return;
+    }
+
     const id = this.parseInputToId(decodedText);
     if (!id) {
       feedback.playError();
@@ -227,8 +253,10 @@ class ScannerService extends EventTarget {
           const locationDbId = json.locationDbId || json.location_db_id || json.locid;
           const proxyMode = json.proxyMode || json.proxy;
           const customProxyUrl = json.customProxyUrl || json.proxyUrl;
+          const jevApiKey = json.jevApiKey || json.jev || json.jev_api_key;
+          const jevMaxAttributes = json.jevMaxAttributes || json.jevmax || json.jev_max;
 
-          if (apiKey || dbId || itemDbId || locationDbId) {
+          if (apiKey || dbId || itemDbId || locationDbId || jevApiKey || jevMaxAttributes) {
             const detail = {};
             if (apiKey) detail.apiKey = String(apiKey).trim();
             if (dbId) detail.dbId = String(dbId).trim();
@@ -236,6 +264,8 @@ class ScannerService extends EventTarget {
             if (locationDbId) detail.locationDbId = String(locationDbId).trim();
             if (proxyMode) detail.proxyMode = String(proxyMode).trim();
             if (customProxyUrl) detail.customProxyUrl = String(customProxyUrl).trim();
+            if (jevApiKey) detail.jevApiKey = String(jevApiKey).trim();
+            if (jevMaxAttributes) detail.jevMaxAttributes = parseInt(jevMaxAttributes, 10);
 
             this.dispatchEvent(new CustomEvent('setup-config-scanned', { detail }));
             return true;
@@ -256,8 +286,10 @@ class ScannerService extends EventTarget {
       const locationDbId = params.get('locationDbId') || params.get('locid') || params.get('location_db_id');
       const proxyMode = params.get('proxy') || params.get('proxyMode');
       const customProxyUrl = params.get('customProxyUrl') || params.get('proxyUrl');
+      const jevApiKey = params.get('jev') || params.get('jevApiKey') || params.get('jev_api_key');
+      const jevMaxAttributes = params.get('jevmax') || params.get('jev_max') || params.get('jevMax');
 
-      if (apiKey || dbId || itemDbId || locationDbId) {
+      if (apiKey || dbId || itemDbId || locationDbId || jevApiKey || jevMaxAttributes) {
         const detail = {};
         if (apiKey) detail.apiKey = apiKey.trim();
         if (dbId) detail.dbId = dbId.trim();
@@ -265,6 +297,8 @@ class ScannerService extends EventTarget {
         if (locationDbId) detail.locationDbId = locationDbId.trim();
         if (proxyMode) detail.proxyMode = proxyMode.trim();
         if (customProxyUrl) detail.customProxyUrl = customProxyUrl.trim();
+        if (jevApiKey) detail.jevApiKey = jevApiKey.trim();
+        if (jevMaxAttributes) detail.jevMaxAttributes = parseInt(jevMaxAttributes, 10);
 
         this.dispatchEvent(new CustomEvent('setup-config-scanned', { detail }));
         return true;
@@ -279,7 +313,15 @@ class ScannerService extends EventTarget {
       return true;
     }
 
-    // 4. Notion データベースURLまたは32桁UUID単体の検出
+    // 4. Jev APIキー単体の検出: jev_...
+    if (/^jev_[a-zA-Z0-9_-]+$/.test(str)) {
+      this.dispatchEvent(new CustomEvent('setup-config-scanned', {
+        detail: { jevApiKey: str }
+      }));
+      return true;
+    }
+
+    // 5. Notion データベースURLまたは32桁UUID単体の検出
     if (str.includes('notion.so') || str.includes('notion.com') || /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str) || /^[0-9a-fA-F]{32}$/.test(str)) {
       if (!/^\d+$/.test(str)) {
         const extracted = NotionClient.extractDatabaseId(str);
@@ -292,11 +334,12 @@ class ScannerService extends EventTarget {
       }
     }
 
-    // 5. 複数行テキストからの検出 (APIキーやDB URLが混在する形式)
+    // 6. 複数行テキストからの検出 (APIキーやDB URLが混在する形式)
     if (str.includes('\n')) {
       const lines = str.split(/\r?\n/);
       let foundApi = null;
       let foundDb = null;
+      let foundJev = null;
       for (const line of lines) {
         const l = line.trim();
         const apiMatch = l.match(/(?:api[_-]?key|api|token|secret)?[:=\s]*(ntn_[a-zA-Z0-9_-]+|secret_[a-zA-Z0-9_-]+)/i);
@@ -307,11 +350,15 @@ class ScannerService extends EventTarget {
           const extracted = NotionClient.extractDatabaseId(dbMatch[1]);
           if (extracted) foundDb = extracted;
         }
+
+        const jevMatch = l.match(/(?:jev[_-]?api[_-]?key|jev[_-]?key|jev)?[:=\s]*(jev_[a-zA-Z0-9_-]+)/i);
+        if (jevMatch) foundJev = jevMatch[1];
       }
-      if (foundApi || foundDb) {
+      if (foundApi || foundDb || foundJev) {
         const detail = {};
         if (foundApi) detail.apiKey = foundApi;
         if (foundDb) detail.dbId = foundDb;
+        if (foundJev) detail.jevApiKey = foundJev;
         this.dispatchEvent(new CustomEvent('setup-config-scanned', { detail }));
         return true;
       }

@@ -20,6 +20,8 @@ const STORAGE_KEYS = {
   NOTION_LOCATION_DB_ID: 'itemdb_notion_location_db_id',
   NOTION_PROXY_MODE: 'itemdb_notion_proxy_mode', // 'auto', 'cloudflare', 'corsproxy', 'direct', 'custom'
   CUSTOM_PROXY_URL: 'itemdb_custom_proxy_url',
+  JEV_API_KEY: 'itemdb_jev_api_key',
+  JEV_MAX_ATTRIBUTES: 'itemdb_jev_max_attributes',
   PROP_MAPPING: 'itemdb_prop_mapping',
   HISTORY: 'itemdb_scan_history'
 };
@@ -45,6 +47,8 @@ class StateStore extends EventTarget {
       locationDbTitle: '',
       proxyMode: localStorage.getItem(STORAGE_KEYS.NOTION_PROXY_MODE) || 'cloudflare',
       customProxyUrl: localStorage.getItem(STORAGE_KEYS.CUSTOM_PROXY_URL) || '',
+      jevApiKey: localStorage.getItem(STORAGE_KEYS.JEV_API_KEY) || '',
+      jevMaxAttributes: parseInt(localStorage.getItem(STORAGE_KEYS.JEV_MAX_ATTRIBUTES) || '3', 10) || 3,
       propMapping: this._loadPropMapping()
     };
 
@@ -142,6 +146,10 @@ class StateStore extends EventTarget {
     if (newConfig.locationDbId !== undefined) localStorage.setItem(STORAGE_KEYS.NOTION_LOCATION_DB_ID, newConfig.locationDbId);
     if (newConfig.proxyMode !== undefined) localStorage.setItem(STORAGE_KEYS.NOTION_PROXY_MODE, newConfig.proxyMode);
     if (newConfig.customProxyUrl !== undefined) localStorage.setItem(STORAGE_KEYS.CUSTOM_PROXY_URL, newConfig.customProxyUrl);
+    if (newConfig.jevApiKey !== undefined) localStorage.setItem(STORAGE_KEYS.JEV_API_KEY, newConfig.jevApiKey);
+    if (newConfig.jevMaxAttributes !== undefined) {
+      localStorage.setItem(STORAGE_KEYS.JEV_MAX_ATTRIBUTES, String(newConfig.jevMaxAttributes));
+    }
     if (newConfig.propMapping !== undefined) {
       localStorage.setItem(STORAGE_KEYS.PROP_MAPPING, JSON.stringify(this.config.propMapping));
     }

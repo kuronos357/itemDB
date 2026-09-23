@@ -3,7 +3,7 @@
  * アプリケーションシェルのオフラインキャッシュ
  */
 
-const CACHE_NAME = 'itemdb-cache-v23';
+const CACHE_NAME = 'itemdb-cache-v25';
 const ASSETS_TO_CACHE = [
   './',
   './style.css',
@@ -14,7 +14,9 @@ const ASSETS_TO_CACHE = [
   './js/notion.js',
   './js/scanner.js',
   './js/audio.js',
-  './js/ui.js'
+  './js/ui.js',
+  './js/barcode.js',
+  './js/jev.js'
 ];
 
 /**
