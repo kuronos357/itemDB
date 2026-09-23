@@ -612,7 +612,9 @@ class Application {
     ui.setLoading(true, nextActive ? 'アクティブに設定中...' : '非アクティブに設定中...');
 
     try {
-      const updated = await notion.updateActiveStatus(pageId, nextActive);
+      const rawProps = (state.currentItem?.pageId === pageId ? state.currentItem?.rawProperties : null)
+                    || (state.currentLocation?.pageId === pageId ? state.currentLocation?.rawProperties : null);
+      const updated = await notion.updateActiveStatus(pageId, nextActive, rawProps);
       feedback.playSuccess();
       ui.showToast(nextActive ? '🟢 アクティブに設定しました' : '⚪ 非アクティブに設定しました', 'success');
 

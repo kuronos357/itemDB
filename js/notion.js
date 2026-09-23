@@ -751,6 +751,52 @@ export class NotionClient {
   }
 
   /**
+   * ページプロパティの中から「アクティブ/非アクティブ」を制御するプロパティを検出
+   * @param {Object} props page.properties
+   * @returns {{ name: string, type: string, prop: Object } | null}
+   */
+  _detectActiveProperty(props) {
+    if (!props || typeof props !== 'object') return null;
+
+    // 1. 完全一致キー
+    const directKeys = ['アクティブ', 'Active', 'active', '有効'];
+    for (const key of directKeys) {
+      if (props[key]) {
+        return { name: key, type: props[key].type, prop: props[key] };
+      }
+    }
+
+    // 2. checkbox 型（名前に「アクティブ」「active」「有効」を含むもの優先）
+    for (const [key, p] of Object.entries(props)) {
+      if (p.type === 'checkbox') {
+        const lower = key.toLowerCase();
+        if (key.includes('アクティブ') || lower.includes('active') || key.includes('有効')) {
+          return { name: key, type: 'checkbox', prop: p };
+        }
+      }
+    }
+
+    // 3. 任意の checkbox 型
+    for (const [key, p] of Object.entries(props)) {
+      if (p.type === 'checkbox') {
+        return { name: key, type: 'checkbox', prop: p };
+      }
+    }
+
+    // 4. status または select 型（名前に「状態」「ステータス」「status」「アクティブ」等を含むもの）
+    for (const [key, p] of Object.entries(props)) {
+      if (p.type === 'status' || p.type === 'select') {
+        const lower = key.toLowerCase();
+        if (key.includes('アクティブ') || lower.includes('active') || key.includes('状態') || key.includes('ステータス') || lower.includes('status')) {
+          return { name: key, type: p.type, prop: p };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * 物品または場所のアクティブ／非アクティブ状態を更新 (PATCH)
    * @param {string} pageId 対象のNotionページID
    * @param {boolean} nextActive 新しいアクティブ状態 (true: アクティブ, false: 非アクティブ)
@@ -763,34 +809,35 @@ export class NotionClient {
       props = page?.rawProperties || {};
     }
 
-    // 「アクティブ」「Active」「有効」プロパティを探索
-    const targetProp = props['アクティブ']
-      || props['Active']
-      || props['有効']
-      || Object.values(props).find(p => p.type === 'checkbox' && (p.name.includes('アクティブ') || p.name.toLowerCase().includes('active')))
-      || Object.values(props).find(p => p.type === 'checkbox')
-      || Object.values(props).find(p => (p.type === 'status' || p.type === 'select') && (p.name.includes('アクティブ') || p.name.includes('状態') || p.name.includes('ステータス')));
-
+    const detected = this._detectActiveProperty(props);
     const properties = {};
-    if (targetProp) {
-      if (targetProp.type === 'checkbox') {
-        properties[targetProp.name] = { checkbox: Boolean(nextActive) };
-      } else if (targetProp.type === 'status') {
-        properties[targetProp.name] = { status: { name: nextActive ? 'アクティブ' : '非アクティブ' } };
-      } else if (targetProp.type === 'select') {
-        properties[targetProp.name] = { select: { name: nextActive ? 'アクティブ' : '非アクティブ' } };
+
+    if (detected) {
+      const { name, type } = detected;
+      if (type === 'checkbox') {
+        properties[name] = { checkbox: Boolean(nextActive) };
+      } else if (type === 'status') {
+        properties[name] = { status: { name: nextActive ? 'アクティブ' : '非アクティブ' } };
+      } else if (type === 'select') {
+        properties[name] = { select: { name: nextActive ? 'アクティブ' : '非アクティブ' } };
       }
     } else {
       // プロパティが見つからない場合はデフォルトで「アクティブ」チェックボックスを試みる
       properties['アクティブ'] = { checkbox: Boolean(nextActive) };
     }
 
-    const res = await this._request(`pages/${pageId}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ properties })
-    });
-
-    return this._normalizeRecord(res);
+    try {
+      const res = await this._request(`pages/${pageId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ properties })
+      });
+      return this._normalizeRecord(res);
+    } catch (err) {
+      if (err.message && err.message.includes('is not a property that exists')) {
+        throw new Error(`Notionに「アクティブ」プロパティ（チェックボックス）が見つかりません。Notionデータベースに「アクティブ」（チェックボックス型）を追加してください。`);
+      }
+      throw err;
+    }
   }
 
   /**
@@ -1007,18 +1054,14 @@ export class NotionClient {
 
     // アクティブフラグの検出 (checkbox または status/select)
     let isActive = null;
-    const activeProp = props['アクティブ']
-      || props['Active']
-      || props['有効']
-      || Object.values(props).find(p => p.type === 'checkbox' && (p.name.includes('アクティブ') || p.name.toLowerCase().includes('active')))
-      || Object.values(props).find(p => p.type === 'checkbox')
-      || Object.values(props).find(p => (p.type === 'status' || p.type === 'select') && (p.name.includes('アクティブ') || p.name.includes('状態') || p.name.includes('ステータス')));
+    const activeInfo = this._detectActiveProperty(props);
 
-    if (activeProp) {
-      if (activeProp.type === 'checkbox') {
-        isActive = Boolean(activeProp.checkbox);
-      } else if (activeProp.type === 'status' || activeProp.type === 'select') {
-        const val = activeProp[activeProp.type]?.name || '';
+    if (activeInfo) {
+      const { type, prop } = activeInfo;
+      if (type === 'checkbox') {
+        isActive = Boolean(prop.checkbox);
+      } else if (type === 'status' || type === 'select') {
+        const val = prop[type]?.name || '';
         isActive = (val === 'アクティブ' || val.toLowerCase() === 'active');
       }
     }
