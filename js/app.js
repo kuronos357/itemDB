@@ -11,6 +11,7 @@ import { scanner } from './scanner.js';
 import { feedback } from './audio.js';
 import { ui } from './ui.js';
 import { BarcodeService } from './barcode.js';
+import { JevService } from './jev.js';
 
 class Application {
   constructor() {
@@ -94,6 +95,10 @@ class Application {
       this._testConnection();
     });
 
+    document.getElementById('btn-test-jev')?.addEventListener('click', () => {
+      this._testJevConnection();
+    });
+
     // データベースURL/ID入力時のリアルタイム抽出表示
     document.getElementById('input-db-id')?.addEventListener('input', (e) => {
       const val = e.target.value.trim();
@@ -115,6 +120,10 @@ class Application {
       this._generateSetupQr();
     });
 
+    document.getElementById('btn-copy-setup-url')?.addEventListener('click', () => {
+      this._copySetupUrl();
+    });
+
     // 動的コンテンツ内のクリックイベント委譲
     document.getElementById('app-main').addEventListener('click', (e) => {
       // 未設定バナーの設定ボタン
@@ -132,6 +141,38 @@ class Application {
       // カメラ切替 (背面 -> 前面 -> 停止 -> 背面)
       if (e.target.closest('#btn-toggle-camera')) {
         scanner.cycleCamera('qr-reader').catch(() => {});
+        return;
+      }
+
+      // 物品詳細: URLコピー
+      const copyItemBtn = e.target.closest('#btn-copy-item-url');
+      if (copyItemBtn) {
+        const id = copyItemBtn.dataset.itemId || state.currentItem?.id;
+        if (id) {
+          const url = ui._generateLabelUrl(id, false);
+          navigator.clipboard.writeText(url).then(() => {
+            ui.showToast('物品URLをコピーしました', 'success');
+            feedback.playSuccess();
+          }).catch(() => {
+            ui.showToast('URLのコピーに失敗しました', 'error');
+          });
+        }
+        return;
+      }
+
+      // 場所詳細: URLコピー
+      const copyLocBtn = e.target.closest('#btn-copy-location-url');
+      if (copyLocBtn) {
+        const id = copyLocBtn.dataset.locId || state.currentLocation?.id;
+        if (id) {
+          const url = ui._generateLabelUrl(id, false);
+          navigator.clipboard.writeText(url).then(() => {
+            ui.showToast('場所URLをコピーしました', 'success');
+            feedback.playSuccess();
+          }).catch(() => {
+            ui.showToast('URLのコピーに失敗しました', 'error');
+          });
+        }
         return;
       }
 
@@ -507,45 +548,19 @@ class Application {
       // 2. 既存の属性オプション（Notion DBの属性選択肢）を取得
       const candidateAttributes = await notion.getAttributeOptions();
 
-      // 3. openBD (ISBN) または Open Food Facts / Jev (JAN) による情報取得
+      // 3. openBD / Google Books (ISBN) または Open Food Facts / Jev (JAN) による情報取得
       const itemData = await BarcodeService.lookup(code, {
         jevApiKey: state.config.jevApiKey,
         jevMaxAttributes: state.config.jevMaxAttributes,
         candidateAttributes
       });
 
-      // 4. 保管場所の選択肢リスト取得（直近の場所や親・子・履歴の場所）
-      const locationList = [];
-      const addedLocIds = new Set();
-
-      const addLoc = (loc) => {
-        if (!loc || !loc.pageId || addedLocIds.has(loc.pageId)) return;
-        addedLocIds.add(loc.pageId);
-        locationList.push(loc);
-      };
-
-      if (state.currentLocation) addLoc(state.currentLocation);
-      if (state.parentLocation) addLoc(state.parentLocation);
-      if (state.subLocations) {
-        for (const sub of state.subLocations) addLoc(sub);
-      }
-      for (const h of state.history) {
-        if (h.type === 'location' && h.pageId) {
-          addLoc(h);
-        }
-      }
-
-      // デフォルトの場所（現在地があればそれ）
-      const defaultLocId = state.currentLocation?.pageId || null;
-
       ui.setLoading(false);
 
-      // 5. プレビュー確認モーダル表示
+      // 4. プレビュー確認モーダル表示 (保管場所は現在の画面状態に応じて自動判定)
       ui.renderBarcodeModal(
         itemData,
         existingRecord,
-        locationList,
-        defaultLocId,
         async (formData) => {
           await this._registerBarcodeItem(formData);
         }
@@ -564,13 +579,41 @@ class Application {
     ui.setLoading(true, 'Notionにアイテムを登録中...');
 
     try {
+      // 保存場所の自動判定：場所画面を開いている状態ならその場所に自動紐付け、ホーム等なら未設定(null)
+      const assignedLocationPageId = (state.currentMode === AppMode.LOCATION_VIEW && state.currentLocation)
+        ? state.currentLocation.pageId
+        : null;
+
+      let finalAttributes = formData.attributes || [];
+
+      // タイトルが入力されており、属性が未分類（空または市販品のみ）かつJev APIキーがある場合は登録前にJev分類を試行
+      if ((finalAttributes.length === 0 || (finalAttributes.length === 1 && finalAttributes[0] === '市販品')) &&
+          state.config.jevApiKey && formData.title && !formData.title.startsWith('市販品 (JAN:')) {
+        try {
+          const candidateAttrs = await notion.getAttributeOptions();
+          if (candidateAttrs.length > 0) {
+            const jevAttrs = await JevService.classify(
+              formData.title,
+              state.config.jevApiKey,
+              candidateAttrs,
+              { maxAttributes: state.config.jevMaxAttributes }
+            );
+            if (Array.isArray(jevAttrs) && jevAttrs.length > 0) {
+              finalAttributes = jevAttrs;
+            }
+          }
+        } catch (jevErr) {
+          console.warn('[App] Jev classification on register failed:', jevErr);
+        }
+      }
+
       const record = await notion.createRecord({
         numericId: null, // Notion側で自動採番
         name: formData.title,
         isItem: true,
-        locationPageId: formData.locationPageId || null,
+        locationPageId: assignedLocationPageId,
         details: formData.details,
-        attributes: formData.attributes,
+        attributes: finalAttributes,
         isAutoRegistered: true,
         coverUrl: formData.coverUrl
       });
@@ -589,10 +632,8 @@ class Application {
 
       // もし現在場所画面を開いていて、その場所に登録した場合はリスト更新
       if (state.currentMode === AppMode.LOCATION_VIEW && state.currentLocation) {
-        if (formData.locationPageId === state.currentLocation.pageId) {
-          state.locationItems.unshift(record);
-          ui.renderLocationView(state.currentLocation, state.locationItems, state.subLocations, state.parentLocation);
-        }
+        state.locationItems.unshift(record);
+        ui.renderLocationView(state.currentLocation, state.locationItems, state.subLocations, state.parentLocation);
       } else if (state.currentMode === AppMode.HOME) {
         // ホーム画面の履歴等を再描画
         ui.renderHomeView();
@@ -908,14 +949,52 @@ class Application {
   }
 
   /**
-   * 別端末（スマホやWatch）セットアップ用のQRコードを生成
+   * Jev (TypeSafe AI) 疎通テスト
    */
-  _generateSetupQr() {
+  async _testJevConnection() {
+    const btn = document.getElementById('btn-test-jev');
+    const statusEl = document.getElementById('jev-status-msg');
+    if (!btn || !statusEl) return;
+
+    const jevApiKey = document.getElementById('input-jev-api-key')?.value.trim();
+    if (!jevApiKey) {
+      statusEl.textContent = 'Jev APIキーを入力してください。';
+      statusEl.className = 'status-text text-warning';
+      return;
+    }
+
+    btn.disabled = true;
+    statusEl.textContent = 'Jev API 接続テスト中...';
+    statusEl.className = 'status-text text-muted';
+
+    try {
+      const res = await JevService.testConnection(jevApiKey);
+      if (res.ok) {
+        statusEl.innerHTML = `✓ ${res.message}`;
+        statusEl.className = 'status-text text-success';
+        feedback.playSuccess();
+      } else {
+        statusEl.textContent = `✕ ${res.message}`;
+        statusEl.className = 'status-text text-danger';
+        feedback.playError();
+      }
+    } catch (e) {
+      statusEl.textContent = `✕ エラー: ${e.message}`;
+      statusEl.className = 'status-text text-danger';
+      feedback.playError();
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  /**
+   * 別端末セットアップ用の共通URLを生成
+   */
+  _buildSetupUrl() {
     const { dbId, apiKey, itemDbId, locationDbId, jevApiKey, jevMaxAttributes } = state.config;
     const effectiveDbId = dbId || itemDbId;
     if (!effectiveDbId || !apiKey) {
-      ui.showToast('先にAPIキーとデータベースIDを入力してください', 'warning');
-      return;
+      return null;
     }
 
     let targetUrl = `${window.location.origin}${window.location.pathname}?dbid=${encodeURIComponent(effectiveDbId)}&api=${encodeURIComponent(apiKey)}`;
@@ -931,6 +1010,37 @@ class Application {
     if (jevMaxAttributes) {
       targetUrl += `&jevmax=${encodeURIComponent(jevMaxAttributes)}`;
     }
+    return targetUrl;
+  }
+
+  /**
+   * 別端末セットアップ用URLをクリップボードにコピー
+   */
+  _copySetupUrl() {
+    const targetUrl = this._buildSetupUrl();
+    if (!targetUrl) {
+      ui.showToast('先にAPIキーとデータベースIDを入力してください', 'warning');
+      return;
+    }
+
+    navigator.clipboard.writeText(targetUrl).then(() => {
+      ui.showToast('設定用URLをクリップボードにコピーしました！', 'success');
+      feedback.playSuccess();
+    }).catch(() => {
+      ui.showToast('URLのコピーに失敗しました', 'error');
+    });
+  }
+
+  /**
+   * 別端末（スマホやWatch）セットアップ用のQRコードを生成
+   */
+  _generateSetupQr() {
+    const targetUrl = this._buildSetupUrl();
+    if (!targetUrl) {
+      ui.showToast('先にAPIキーとデータベースIDを入力してください', 'warning');
+      return;
+    }
+
     const qrContainer = document.getElementById('setup-qr-preview');
     if (!qrContainer) return;
 

@@ -100,16 +100,17 @@ export class BarcodeService {
   }
 
   /**
-   * openBD API による書籍情報の検索
+   * openBD API および Google Books API による書籍情報の検索
    */
   static async _lookupIsbn(isbn) {
+    // 1. openBD API (国内書籍の最高精度)
     try {
       const res = await fetch(`https://api.openbd.jp/v1/get?isbn=${encodeURIComponent(isbn)}`);
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data) && data[0] && data[0].summary) {
           const s = data[0].summary;
-          const title = s.title || `書籍 (ISBN: ${isbn})`;
+          const title = s.title || '';
           const author = s.author || '';
           const publisher = s.publisher || '';
           const pubdate = s.pubdate || '';
@@ -123,7 +124,7 @@ export class BarcodeService {
           return {
             code: isbn,
             isIsbn: true,
-            title,
+            title: title || `書籍 (ISBN: ${isbn})`,
             author,
             publisher,
             coverUrl,
@@ -136,11 +137,48 @@ export class BarcodeService {
       console.warn('[BarcodeService] openBD lookup error:', e);
     }
 
-    // openBDでヒットしなかった場合のフォールバック
+    // 2. Google Books API フォールバック (openBDに無い書籍・専門書・洋書に対応)
+    try {
+      const gRes = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn)}`);
+      if (gRes.ok) {
+        const gData = await gRes.json();
+        if (gData.items && gData.items.length > 0) {
+          const vol = gData.items[0].volumeInfo || {};
+          const title = vol.title || '';
+          const author = Array.isArray(vol.authors) ? vol.authors.join(', ') : '';
+          const publisher = vol.publisher || '';
+          const pubdate = vol.publishedDate || '';
+          let coverUrl = vol.imageLinks?.thumbnail || vol.imageLinks?.smallThumbnail || null;
+          if (coverUrl && coverUrl.startsWith('http://')) {
+            coverUrl = coverUrl.replace('http://', 'https://');
+          }
+
+          const detailLines = [`ISBN: ${isbn}`];
+          if (author) detailLines.push(`著者: ${author}`);
+          if (publisher) detailLines.push(`出版社: ${publisher}`);
+          if (pubdate) detailLines.push(`刊行年月: ${pubdate}`);
+
+          return {
+            code: isbn,
+            isIsbn: true,
+            title: title || `書籍 (ISBN: ${isbn})`,
+            author,
+            publisher,
+            coverUrl,
+            details: detailLines.join('\n'),
+            attributes: ['本']
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('[BarcodeService] Google Books lookup error:', e);
+    }
+
+    // 3. 両方で見つからなかった場合のフォールバック（手入力を促す）
     return {
       code: isbn,
       isIsbn: true,
-      title: `書籍 (ISBN: ${isbn})`,
+      title: '',
       author: '',
       publisher: '',
       coverUrl: null,
@@ -150,11 +188,11 @@ export class BarcodeService {
   }
 
   /**
-   * JANコードによる一般商品情報の検索 (Open Food Facts / フォールバック)
+   * JANコードによる一般商品情報の検索 (Open Food Facts / Google Books / フォールバック)
    */
   static async _lookupJan(jan) {
+    // 1. Open Food Facts API (食品・日用品の一部をカバー)
     try {
-      // Open Food Facts API (食品・日用品の一部をカバー)
       const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(jan)}.json`, {
         headers: { 'User-Agent': 'itemDB - Web - 1.0' }
       });
@@ -162,7 +200,7 @@ export class BarcodeService {
         const data = await res.json();
         if (data.status === 1 && data.product) {
           const p = data.product;
-          const title = p.product_name_ja || p.product_name || p.product_name_en || `市販品 (JAN: ${jan})`;
+          const title = p.product_name_ja || p.product_name || p.product_name_en || '';
           const brand = p.brands || '';
           const quantity = p.quantity || '';
           const coverUrl = p.image_url || p.image_front_url || null;
@@ -174,7 +212,7 @@ export class BarcodeService {
           return {
             code: jan,
             isIsbn: false,
-            title,
+            title: title || '',
             author: brand,
             publisher: brand,
             coverUrl,
@@ -187,11 +225,48 @@ export class BarcodeService {
       console.warn('[BarcodeService] Open Food Facts lookup error:', e);
     }
 
-    // 未ヒット時のフォールバック
+    // 2. 書籍系JAN（978始まり以外の書籍や雑誌コード等）の可能性をGoogle Booksで確認
+    try {
+      const gRes = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(jan)}`);
+      if (gRes.ok) {
+        const gData = await gRes.json();
+        if (gData.items && gData.items.length > 0) {
+          const vol = gData.items[0].volumeInfo || {};
+          const title = vol.title || '';
+          const author = Array.isArray(vol.authors) ? vol.authors.join(', ') : '';
+          const publisher = vol.publisher || '';
+          const pubdate = vol.publishedDate || '';
+          let coverUrl = vol.imageLinks?.thumbnail || vol.imageLinks?.smallThumbnail || null;
+          if (coverUrl && coverUrl.startsWith('http://')) {
+            coverUrl = coverUrl.replace('http://', 'https://');
+          }
+
+          const detailLines = [`JAN/ISBN: ${jan}`];
+          if (author) detailLines.push(`著者: ${author}`);
+          if (publisher) detailLines.push(`出版社: ${publisher}`);
+          if (pubdate) detailLines.push(`刊行年月: ${pubdate}`);
+
+          return {
+            code: jan,
+            isIsbn: true,
+            title: title || '',
+            author,
+            publisher,
+            coverUrl,
+            details: detailLines.join('\n'),
+            attributes: ['本']
+          };
+        }
+      }
+    } catch (e) {
+      // 無視
+    }
+
+    // 未ヒット時のフォールバック（手入力を促す）
     return {
       code: jan,
       isIsbn: false,
-      title: `市販品 (JAN: ${jan})`,
+      title: '',
       author: '',
       publisher: '',
       coverUrl: null,

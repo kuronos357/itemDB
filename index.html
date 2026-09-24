@@ -119,20 +119,31 @@
         </div>
 
         <div class="form-group mt-2">
-          <button id="btn-test-connection" class="btn btn-secondary">
-            <span>疎通テストを実行</span>
-          </button>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button id="btn-test-connection" class="btn btn-secondary" style="flex: 1;">
+              <span>Notion 疎通テスト</span>
+            </button>
+            <button id="btn-test-jev" class="btn btn-secondary" style="flex: 1;">
+              <span>Jev 接続テスト</span>
+            </button>
+          </div>
           <span id="connection-status-msg" class="status-text mt-2"></span>
+          <span id="jev-status-msg" class="status-text mt-1"></span>
         </div>
 
         <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 8px 0;">
 
         <div class="form-group">
-          <label>別端末 (スマホ/Apple Watch) 設定用QR</label>
-          <p class="text-sub">この端末で保存した設定を他の端末に簡単に引き継ぐためのQRコードです。</p>
-          <button id="btn-generate-setup-qr" class="btn btn-secondary mt-2">
-            <span>設定用QRコードを生成</span>
-          </button>
+          <label>別端末 (スマホ/Apple Watch) 連携</label>
+          <p class="text-sub">この端末で保存した設定を他の端末に簡単に引き継ぐことができます。</p>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;" class="mt-2">
+            <button id="btn-generate-setup-qr" class="btn btn-secondary" style="flex: 1;">
+              <span>設定用QRを生成</span>
+            </button>
+            <button id="btn-copy-setup-url" class="btn btn-secondary" style="flex: 1;">
+              <span>📋 設定用URLをコピー</span>
+            </button>
+          </div>
           <div id="setup-qr-wrapper" class="mt-3 hidden" style="text-align: center;">
             <div id="setup-qr-preview" style="display: inline-block; padding: 10px; background: #fff; border-radius: 8px;"></div>
             <p class="text-sub mt-2">このQRコードをカメラで読み取ると自動設定されます。</p>
@@ -281,7 +292,7 @@
         <!-- 品名 / タイトル入力 -->
         <div class="form-group">
           <label for="barcode-item-title">品名 / 書名</label>
-          <input type="text" id="barcode-item-title" class="form-input" placeholder="商品名または書籍名">
+          <input type="text" id="barcode-item-title" class="form-input" placeholder="商品名または書籍名 (空欄時はコード番号)">
         </div>
 
         <!-- 属性タグ -->
@@ -295,15 +306,6 @@
         <div class="form-group">
           <label for="barcode-item-details">詳細 (著者/出版社/コード等)</label>
           <textarea id="barcode-item-details" class="form-input" rows="3" style="resize: vertical; font-family: inherit; font-size: 0.85rem;" placeholder="ISBN: ..."></textarea>
-        </div>
-
-        <!-- 保管場所選択 -->
-        <div class="form-group">
-          <label for="barcode-item-location">保管場所 (物理アドレス)</label>
-          <select id="barcode-item-location" class="form-select">
-            <option value="">(未設定)</option>
-          </select>
-          <span class="text-sub">登録先の棚や収納場所を選択します。</span>
         </div>
       </div>
       <div class="modal-footer">

@@ -300,6 +300,10 @@ class UIManager {
               <span class="btn-icon">📍</span>
               <span>場所変更</span>
             </button>
+            <button id="btn-copy-item-url" class="btn btn-secondary" data-item-id="${item.id}" title="この物品のURLをコピー">
+              <span class="btn-icon">📋</span>
+              <span>URLコピー</span>
+            </button>
             <button id="btn-open-label-modal" class="btn btn-secondary">
               <span class="btn-icon">🏷️</span>
               <span>ラベル・QR</span>
@@ -408,6 +412,10 @@ class UIManager {
             <button id="btn-edit-batch" class="btn btn-secondary">
               <span class="btn-icon">⚡</span>
               <span>一括棚卸</span>
+            </button>
+            <button id="btn-copy-location-url" class="btn btn-secondary" data-loc-id="${location.id}" title="この場所のURLをコピー">
+              <span class="btn-icon">📋</span>
+              <span>URLコピー</span>
             </button>
             <button id="btn-open-label-modal" class="btn btn-secondary">
               <span class="btn-icon">🏷️</span>
@@ -881,7 +889,7 @@ class UIManager {
   /**
    * バーコード新規登録プレビューモーダルの表示
    */
-  renderBarcodeModal(itemData, duplicateRecord = null, locationList = [], defaultLocationPageId = null, onRegisterCallback = null) {
+  renderBarcodeModal(itemData, duplicateRecord = null, onRegisterCallback = null) {
     const modal = document.getElementById('barcode-modal');
     if (!modal) return;
 
@@ -896,7 +904,6 @@ class UIManager {
     const titleInput = document.getElementById('barcode-item-title');
     const attrInput = document.getElementById('barcode-item-attr');
     const detailsInput = document.getElementById('barcode-item-details');
-    const locSelect = document.getElementById('barcode-item-location');
 
     // アイコン・タイトル
     if (iconEl) iconEl.textContent = itemData.isIsbn ? '📚' : '📦';
@@ -928,31 +935,17 @@ class UIManager {
     if (attrInput) attrInput.value = (itemData.attributes || []).join(', ');
     if (detailsInput) detailsInput.value = itemData.details || '';
 
-    // 保管場所セレクトボックス
-    if (locSelect) {
-      locSelect.innerHTML = '<option value="">(未設定)</option>';
-      for (const loc of locationList) {
-        const opt = document.createElement('option');
-        opt.value = loc.pageId;
-        opt.textContent = `${loc.name} (#${loc.id})`;
-        if (defaultLocationPageId && (loc.pageId === defaultLocationPageId || String(loc.id) === String(defaultLocationPageId))) {
-          opt.selected = true;
-        }
-        locSelect.appendChild(opt);
-      }
-    }
-
     // 登録ボタンのハンドラ配線
     const submitBtn = document.getElementById('btn-submit-barcode');
     if (submitBtn) {
       submitBtn.onclick = () => {
-        const editedTitle = titleInput?.value.trim() || itemData.title;
+        const fallbackName = itemData.isIsbn ? `書籍 (${itemData.code})` : `市販品 (${itemData.code})`;
+        const editedTitle = titleInput?.value.trim() || itemData.title || fallbackName;
         const rawAttr = attrInput?.value.trim() || '';
         const editedAttrs = rawAttr
           ? rawAttr.split(/[,、\s]+/).map(s => s.trim()).filter(Boolean)
           : (itemData.attributes || []);
         const editedDetails = detailsInput?.value.trim() || itemData.details || '';
-        const selectedLocId = locSelect?.value || null;
 
         this.closeBarcodeModal();
 
@@ -963,7 +956,6 @@ class UIManager {
             title: editedTitle,
             attributes: editedAttrs,
             details: editedDetails,
-            locationPageId: selectedLocId,
             coverUrl: itemData.coverUrl || null
           });
         }

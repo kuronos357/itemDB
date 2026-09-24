@@ -1046,15 +1046,22 @@ export class NotionClient {
       }
     }
 
-    // 6. 属性 (Multi-select) プロパティ
+    // 6. 属性 (Multi-select / Select) プロパティ
     if (attributes && attributes.length > 0) {
       const attrProp = props['属性']
-        || Object.values(props).find(p => p.name === '属性' && p.type === 'multi_select')
+        || Object.values(props).find(p => p.name === '属性' && (p.type === 'multi_select' || p.type === 'select'))
         || Object.values(props).find(p => p.type === 'multi_select');
       if (attrProp) {
-        properties[attrProp.name] = {
-          multi_select: attributes.map(tag => ({ name: String(tag).trim() })).filter(t => t.name)
-        };
+        if (attrProp.type === 'select') {
+          const first = attributes.map(tag => String(tag).trim()).filter(Boolean)[0];
+          if (first) {
+            properties[attrProp.name] = { select: { name: first } };
+          }
+        } else {
+          properties[attrProp.name] = {
+            multi_select: attributes.map(tag => ({ name: String(tag).trim() })).filter(t => t.name)
+          };
+        }
       }
     }
 
@@ -1072,20 +1079,25 @@ export class NotionClient {
       properties['アクティブ'] = { checkbox: true };
     }
 
-    // リクエストボディ構築 (カバー画像対応)
+    // カバー画像 URL の検証（http/httpsで始まる有効なURL文字列のみセット）
+    const validCoverUrl = (typeof coverUrl === 'string' && /^https?:\/\/.+/i.test(coverUrl.trim()))
+      ? coverUrl.trim()
+      : null;
+
+    // リクエストボディ構築
     const requestBody = {
-      parent: { data_source_id: targetDbId },
+      parent: { database_id: targetDbId },
       properties
     };
 
-    if (coverUrl) {
+    if (validCoverUrl) {
       requestBody.cover = {
         type: 'external',
-        external: { url: coverUrl }
+        external: { url: validCoverUrl }
       };
     }
 
-    // 2025-09-03 では data_source_id または database_id で親を指定
+    // Notion API 呼び出し（多層フォールバック機構）
     let res = null;
     try {
       res = await this._request(`pages`, {
@@ -1093,14 +1105,85 @@ export class NotionClient {
         body: JSON.stringify(requestBody)
       });
     } catch (err) {
-      if (err.status === 400 || err.status === 404 || err.message?.includes('data_source_id')) {
-        requestBody.parent = { database_id: targetDbId };
+      console.warn('[NotionClient] createRecord initial attempt failed:', err.message);
+
+      // フォールバック1: data_source_id への切り替え試行
+      try {
+        requestBody.parent = { data_source_id: targetDbId };
         res = await this._request(`pages`, {
           method: 'POST',
           body: JSON.stringify(requestBody)
         });
-      } else {
-        throw err;
+      } catch (err2) {
+        // フォールバック2: cover に起因するエラーの可能性を排除（cover 除去して database_id または data_source_id で試行）
+        if (requestBody.cover) {
+          delete requestBody.cover;
+          try {
+            requestBody.parent = { database_id: targetDbId };
+            res = await this._request(`pages`, {
+              method: 'POST',
+              body: JSON.stringify(requestBody)
+            });
+          } catch (err3) {
+            try {
+              requestBody.parent = { data_source_id: targetDbId };
+              res = await this._request(`pages`, {
+                method: 'POST',
+                body: JSON.stringify(requestBody)
+              });
+            } catch (err4) {
+              // フォールバック3: カスタムプロパティ（属性・詳細等）の型不一致を排除し、タイトルとIDのみで作成
+              console.warn('[NotionClient] Retrying with minimal properties (title and ID only)...');
+              const minimalProperties = {
+                [titlePropName]: properties[titlePropName]
+              };
+              if (properties[idPropName]) {
+                minimalProperties[idPropName] = properties[idPropName];
+              }
+              const minimalBody = {
+                parent: { database_id: targetDbId },
+                properties: minimalProperties
+              };
+              try {
+                res = await this._request(`pages`, {
+                  method: 'POST',
+                  body: JSON.stringify(minimalBody)
+                });
+              } catch (err5) {
+                minimalBody.parent = { data_source_id: targetDbId };
+                res = await this._request(`pages`, {
+                  method: 'POST',
+                  body: JSON.stringify(minimalBody)
+                });
+              }
+            }
+          }
+        } else {
+          // cover がない場合の最小プロパティ再試行
+          console.warn('[NotionClient] Retrying with minimal properties...');
+          const minimalProperties = {
+            [titlePropName]: properties[titlePropName]
+          };
+          if (properties[idPropName]) {
+            minimalProperties[idPropName] = properties[idPropName];
+          }
+          const minimalBody = {
+            parent: { database_id: targetDbId },
+            properties: minimalProperties
+          };
+          try {
+            res = await this._request(`pages`, {
+              method: 'POST',
+              body: JSON.stringify(minimalBody)
+            });
+          } catch (err3) {
+            minimalBody.parent = { data_source_id: targetDbId };
+            res = await this._request(`pages`, {
+              method: 'POST',
+              body: JSON.stringify(minimalBody)
+            });
+          }
+        }
       }
     }
 

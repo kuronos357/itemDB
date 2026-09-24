@@ -24,6 +24,52 @@ export async function onRequest(context) {
 
   // [[path]] で受け取ったパス配列を結合 (例: ["databases", "3dc5..."])
   const path = Array.isArray(params.path) ? params.path.join("/") : (params.path || "");
+
+  // Jev (TypeSafe AI) プロキシ (/api/jev)
+  if (path === "jev" || path === "jev/") {
+    const authHeader = request.headers.get("Authorization") || "";
+    if (!authHeader.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Missing or invalid Authorization header for Jev" }), {
+        status: 401,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*"
+        }
+      });
+    }
+
+    try {
+      const body = ["GET", "HEAD"].includes(request.method) ? undefined : await request.arrayBuffer();
+      const jevRes = await fetch("https://api.typesafe.ai/v1/systemone", {
+        method: request.method,
+        headers: {
+          "Authorization": authHeader,
+          "Content-Type": "application/json"
+        },
+        body
+      });
+
+      const responseHeaders = new Headers(jevRes.headers);
+      responseHeaders.set("Access-Control-Allow-Origin", "*");
+      responseHeaders.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      responseHeaders.set("Access-Control-Allow-Headers", "Authorization, Content-Type, accept");
+
+      return new Response(jevRes.body, {
+        status: jevRes.status,
+        statusText: jevRes.statusText,
+        headers: responseHeaders
+      });
+    } catch (jevErr) {
+      return new Response(JSON.stringify({ error: `Jev proxy error: ${jevErr.message}` }), {
+        status: 502,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*"
+        }
+      });
+    }
+  }
+
   const url = new URL(request.url);
   const targetUrl = new URL(`https://api.notion.com/v1/${path}${url.search}`);
 

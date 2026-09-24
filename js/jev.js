@@ -126,4 +126,78 @@ export class JevService {
       return [];
     }
   }
+
+  /**
+   * Jev API の疎通テストを実行
+   * @param {string} apiKey Jev APIキー
+   * @returns {Promise<{ ok: boolean, duration?: number, message: string, details?: any }>}
+   */
+  static async testConnection(apiKey) {
+    if (!apiKey || !apiKey.trim()) {
+      return { ok: false, message: 'Jev APIキーが入力されていません。' };
+    }
+
+    const testPayload = {
+      model: 'jev-latest',
+      state: '商品名: シャープペンシル 0.5mm',
+      questions: {
+        category: {
+          type: 'choice',
+          options: ['文房具', '日用品', '書籍']
+        }
+      }
+    };
+
+    const startTime = performance.now();
+    const cleanKey = apiKey.trim();
+
+    const callEndpoint = async (url) => {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${cleanKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(testPayload)
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        if (res.status === 401) msg = 'APIキーが無効、または認証に失敗しました (401 Unauthorized)';
+        else if (res.status === 403) msg = 'アクセス権限がありません (403 Forbidden)';
+        else if (res.status === 429) msg = 'リクエスト上限に達しました (429 Rate Limit)';
+        else if (data?.error) msg = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
+        const err = new Error(msg);
+        err.status = res.status;
+        throw err;
+      }
+      return data;
+    };
+
+    try {
+      let data = null;
+      let usedEndpoint = '/api/jev';
+      try {
+        data = await callEndpoint('/api/jev');
+      } catch (proxyErr) {
+        usedEndpoint = 'https://api.typesafe.ai/v1/systemone (直通)';
+        data = await callEndpoint('https://api.typesafe.ai/v1/systemone');
+      }
+
+      const duration = Math.round(performance.now() - startTime);
+      const categoryAnswer = data?.answers?.category;
+      return {
+        ok: true,
+        duration,
+        message: `接続成功 (${duration}ms): 分類AIが正常に応答しました。`,
+        details: { usedEndpoint, answer: categoryAnswer }
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        message: `接続エラー: ${err.message}`,
+        details: { error: err }
+      };
+    }
+  }
 }
