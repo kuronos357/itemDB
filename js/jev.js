@@ -7,6 +7,20 @@
 
 export class JevService {
   /**
+   * Jev API のプロキシエンドポイントURLを取得
+   * ローカル環境 (localhost / 127.0.0.1) の場合は本番の Cloudflare Pages プロキシを利用
+   */
+  static _getEndpointUrl() {
+    if (typeof window !== 'undefined' && window.location) {
+      const hostname = window.location.hostname;
+      if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '') {
+        return 'https://itemdb.pages.dev/api/jev';
+      }
+    }
+    return '/api/jev';
+  }
+
+  /**
    * 商品名から属性・カテゴリを自動判定
    * 
    * @param {string} title 商品名
@@ -36,31 +50,41 @@ export class JevService {
       }
     };
 
-    const callEndpoint = async (url) => {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey.trim()}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
-      });
-      if (!res.ok) {
-        throw new Error(`Jev API error: ${res.status}`);
-      }
-      return await res.json();
-    };
+    const primaryEndpoint = this._getEndpointUrl();
 
     try {
-      let data = null;
+      let res = null;
       try {
-        // 1. Cloudflare Pages Functions プロキシ経由
-        data = await callEndpoint('/api/jev');
-      } catch (proxyErr) {
-        // 2. 直通エンドポイントへのフォールバック
-        data = await callEndpoint('https://api.typesafe.ai/v1/systemone');
+        res = await fetch(primaryEndpoint, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey.trim()}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        });
+      } catch (netErr) {
+        if (primaryEndpoint !== 'https://itemdb.pages.dev/api/jev') {
+          res = await fetch('https://itemdb.pages.dev/api/jev', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey.trim()}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+          });
+        } else {
+          throw netErr;
+        }
       }
 
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null);
+        console.warn('[JevService] Jev API error:', res.status, errData);
+        return [];
+      }
+
+      const data = await res.json();
       const categoryAnswer = data?.answers?.category;
       if (!categoryAnswer) return [];
 
@@ -150,8 +174,9 @@ export class JevService {
 
     const startTime = performance.now();
     const cleanKey = apiKey.trim();
+    const primaryEndpoint = this._getEndpointUrl();
 
-    const callEndpoint = async (url) => {
+    const doRequest = async (url) => {
       const res = await fetch(url, {
         method: 'POST',
         headers: {
@@ -161,27 +186,53 @@ export class JevService {
         body: JSON.stringify(testPayload)
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        let msg = `HTTP ${res.status}`;
-        if (res.status === 401) msg = 'APIキーが無効、または認証に失敗しました (401 Unauthorized)';
-        else if (res.status === 403) msg = 'アクセス権限がありません (403 Forbidden)';
-        else if (res.status === 429) msg = 'リクエスト上限に達しました (429 Rate Limit)';
-        else if (data?.error) msg = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
-        const err = new Error(msg);
-        err.status = res.status;
-        throw err;
-      }
-      return data;
+      return { res, data };
     };
 
     try {
-      let data = null;
-      let usedEndpoint = '/api/jev';
+      let reqResult = null;
+      let usedEndpoint = primaryEndpoint;
+
       try {
-        data = await callEndpoint('/api/jev');
-      } catch (proxyErr) {
-        usedEndpoint = 'https://api.typesafe.ai/v1/systemone (直通)';
-        data = await callEndpoint('https://api.typesafe.ai/v1/systemone');
+        reqResult = await doRequest(primaryEndpoint);
+      } catch (networkErr) {
+        // もしローカル環境等で /api/jev のネットワークエラーが発生した場合は本番プロキシを試行
+        if (primaryEndpoint !== 'https://itemdb.pages.dev/api/jev') {
+          usedEndpoint = 'https://itemdb.pages.dev/api/jev';
+          reqResult = await doRequest(usedEndpoint);
+        } else {
+          throw networkErr;
+        }
+      }
+
+      const { res, data } = reqResult;
+
+      if (!res.ok) {
+        let errorDetail = '';
+        if (data?.detail?.message) {
+          errorDetail = data.detail.message;
+        } else if (data?.detail && typeof data.detail === 'string') {
+          errorDetail = data.detail;
+        } else if (data?.error) {
+          errorDetail = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
+        }
+
+        let userMsg = `HTTP ${res.status}`;
+        if (res.status === 401) {
+          userMsg = errorDetail ? `認証エラー (401): ${errorDetail}` : 'APIキーが無効、または認証に失敗しました (401 Unauthorized)';
+        } else if (res.status === 403) {
+          userMsg = errorDetail ? `アクセス拒否 (403): ${errorDetail}` : 'アクセス権限がありません (403 Forbidden)';
+        } else if (res.status === 429) {
+          userMsg = errorDetail ? `利用制限 (429): ${errorDetail}` : 'リクエスト上限に達しました (429 Rate Limit)';
+        } else if (errorDetail) {
+          userMsg = `エラー (${res.status}): ${errorDetail}`;
+        }
+
+        return {
+          ok: false,
+          message: userMsg,
+          details: { status: res.status, data, usedEndpoint }
+        };
       }
 
       const duration = Math.round(performance.now() - startTime);
@@ -195,7 +246,7 @@ export class JevService {
     } catch (err) {
       return {
         ok: false,
-        message: `接続エラー: ${err.message}`,
+        message: `通信エラー: ${err.message}`,
         details: { error: err }
       };
     }
