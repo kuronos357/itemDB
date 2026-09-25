@@ -39,13 +39,19 @@ export class JevService {
 
     const maxN = Math.max(1, parseInt(options.maxAttributes, 10) || 3);
 
+    const criteria = {};
+    for (const opt of candidateOptions) {
+      criteria[opt] = `${opt}`;
+    }
+
     const payload = {
       model: 'jev-latest',
       state: `商品名: ${title}`,
       questions: {
         category: {
           type: 'choice',
-          options: candidateOptions
+          instructions: '商品名に最も適合するカテゴリを1つ選択してください。',
+          criteria
         }
       }
     };
@@ -167,7 +173,12 @@ export class JevService {
       questions: {
         category: {
           type: 'choice',
-          options: ['文房具', '日用品', '書籍']
+          instructions: '商品名に最も適合するカテゴリを1つ選択してください。',
+          criteria: {
+            '文房具': 'ペン、ノート、文具全般',
+            '日用品': '洗剤、生活雑貨、消耗品',
+            '書籍': '本、雑誌、コミック'
+          }
         }
       }
     };
@@ -209,7 +220,10 @@ export class JevService {
 
       if (!res.ok) {
         let errorDetail = '';
-        if (data?.detail?.message) {
+        if (Array.isArray(data?.detail)) {
+          // FastAPI / Pydantic validation error: [{ loc: [...], msg: "..." }]
+          errorDetail = data.detail.map(d => `${d.loc ? d.loc.slice(1).join('.') + ': ' : ''}${d.msg}`).join(', ');
+        } else if (data?.detail?.message) {
           errorDetail = data.detail.message;
         } else if (data?.detail && typeof data.detail === 'string') {
           errorDetail = data.detail;

@@ -22,6 +22,7 @@ const STORAGE_KEYS = {
   CUSTOM_PROXY_URL: 'itemdb_custom_proxy_url',
   JEV_API_KEY: 'itemdb_jev_api_key',
   JEV_MAX_ATTRIBUTES: 'itemdb_jev_max_attributes',
+  GEMINI_API_KEY: 'itemdb_gemini_api_key',
   YAHOO_APP_ID: 'itemdb_yahoo_app_id',
   PROP_MAPPING: 'itemdb_prop_mapping',
   HISTORY: 'itemdb_scan_history'
@@ -50,6 +51,7 @@ class StateStore extends EventTarget {
       customProxyUrl: localStorage.getItem(STORAGE_KEYS.CUSTOM_PROXY_URL) || '',
       jevApiKey: localStorage.getItem(STORAGE_KEYS.JEV_API_KEY) || '',
       jevMaxAttributes: parseInt(localStorage.getItem(STORAGE_KEYS.JEV_MAX_ATTRIBUTES) || '3', 10) || 3,
+      geminiApiKey: localStorage.getItem(STORAGE_KEYS.GEMINI_API_KEY) || '',
       yahooAppId: localStorage.getItem(STORAGE_KEYS.YAHOO_APP_ID) || '',
       propMapping: this._loadPropMapping()
     };
@@ -152,6 +154,9 @@ class StateStore extends EventTarget {
     if (newConfig.jevMaxAttributes !== undefined) {
       localStorage.setItem(STORAGE_KEYS.JEV_MAX_ATTRIBUTES, String(newConfig.jevMaxAttributes));
     }
+    if (newConfig.geminiApiKey !== undefined) {
+      localStorage.setItem(STORAGE_KEYS.GEMINI_API_KEY, newConfig.geminiApiKey);
+    }
     if (newConfig.yahooAppId !== undefined) {
       localStorage.setItem(STORAGE_KEYS.YAHOO_APP_ID, newConfig.yahooAppId);
     }
@@ -212,4 +217,5 @@ class StateStore extends EventTarget {
   }
 }
 
+export const APP_VERSION = 'v32';
 export const state = new StateStore();

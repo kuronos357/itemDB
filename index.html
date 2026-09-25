@@ -32,7 +32,10 @@
     <!-- ヘッダー -->
     <header class="app-header">
       <div class="logo-section">
-        <h1 class="app-title">itemDB</h1>
+        <div style="display: flex; align-items: baseline; gap: 6px;">
+          <h1 class="app-title">itemDB</h1>
+          <span class="badge" style="font-size: 0.7rem; padding: 1px 5px; background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 4px; font-weight: 500;">v32</span>
+        </div>
         <span class="app-subtitle">Logistics & Cache</span>
       </div>
       <div class="header-actions">
@@ -127,6 +130,12 @@
         </div>
 
         <div class="form-group mt-2">
+          <label for="input-gemini-api-key">Gemini APIキー (Google AI Studio) <small style="color: var(--text-muted); font-size: 0.75rem;">[任意 / AI Pro特典対応]</small></label>
+          <input type="password" id="input-gemini-api-key" class="form-input" placeholder="AIzaSyxxxxxxxxxxxxxxxxx">
+          <span class="text-sub">JANコードの長文タイトルを洗練された商品名に要約・整形し、属性の自動分類フォールバックにも使用します（Gemini 2.5 Flash）。</span>
+        </div>
+
+        <div class="form-group mt-2">
           <div style="display: flex; gap: 8px; flex-wrap: wrap;">
             <button id="btn-test-connection" class="btn btn-secondary" style="flex: 1; min-width: 110px;">
               <span>Notion 疎通テスト</span>
@@ -137,10 +146,14 @@
             <button id="btn-test-jev" class="btn btn-secondary" style="flex: 1; min-width: 110px;">
               <span>Jev 接続テスト</span>
             </button>
+            <button id="btn-test-gemini" class="btn btn-secondary" style="flex: 1; min-width: 110px;">
+              <span>Gemini 接続テスト</span>
+            </button>
           </div>
           <span id="connection-status-msg" class="status-text mt-2"></span>
           <span id="yahoo-status-msg" class="status-text mt-1"></span>
           <span id="jev-status-msg" class="status-text mt-1"></span>
+          <span id="gemini-status-msg" class="status-text mt-1"></span>
         </div>
 
         <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 8px 0;">
@@ -162,7 +175,8 @@
           </div>
         </div>
       </div>
-      <div class="modal-footer">
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <span class="text-sub" style="font-size: 0.75rem; color: var(--text-muted);">itemDB Build 32</span>
         <button id="btn-save-settings" class="btn btn-primary">設定を保存</button>
       </div>
     </div>

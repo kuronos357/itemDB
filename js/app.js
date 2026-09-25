@@ -12,6 +12,7 @@ import { feedback } from './audio.js';
 import { ui } from './ui.js';
 import { BarcodeService } from './barcode.js';
 import { JevService } from './jev.js';
+import { GeminiService } from './gemini.js';
 
 class Application {
   constructor() {
@@ -101,6 +102,10 @@ class Application {
 
     document.getElementById('btn-test-jev')?.addEventListener('click', () => {
       this._testJevConnection();
+    });
+
+    document.getElementById('btn-test-gemini')?.addEventListener('click', () => {
+      this._testGeminiConnection();
     });
 
     // データベースURL/ID入力時のリアルタイム抽出表示
@@ -281,9 +286,10 @@ class Application {
     const yappid = params.get('yappid') || params.get('yahooAppId') || params.get('yahoo');
     const jev = params.get('jev') || params.get('jevApiKey') || params.get('jev_api_key');
     const jevMax = params.get('jevmax') || params.get('jev_max') || params.get('jevMax');
+    const gemini = params.get('gemini') || params.get('geminiApiKey') || params.get('gemini_api_key');
     const id = params.get('id');
 
-    if (dbid || api || jev || jevMax || yappid) {
+    if (dbid || api || jev || jevMax || yappid || gemini) {
       const hasDirectId = (id && /^\d+$/.test(id));
       await this._applySetupConfig({
         dbId: dbid,
@@ -292,7 +298,8 @@ class Application {
         proxyMode: proxy,
         yahooAppId: yappid,
         jevApiKey: jev,
-        jevMaxAttributes: jevMax ? parseInt(jevMax, 10) : undefined
+        jevMaxAttributes: jevMax ? parseInt(jevMax, 10) : undefined,
+        geminiApiKey: gemini
       }, null, !hasDirectId);
 
       // URLから秘密トークンを除去
@@ -337,6 +344,7 @@ class Application {
     if (config.yahooAppId) updates.yahooAppId = config.yahooAppId;
     if (config.jevApiKey) updates.jevApiKey = config.jevApiKey;
     if (config.jevMaxAttributes !== undefined) updates.jevMaxAttributes = config.jevMaxAttributes;
+    if (config.geminiApiKey) updates.geminiApiKey = config.geminiApiKey;
 
     state.saveConfig(updates);
 
@@ -555,10 +563,11 @@ class Application {
       // 2. 既存の属性オプション（Notion DBの属性選択肢）を取得
       const candidateAttributes = await notion.getAttributeOptions();
 
-      // 3. openBD / Google Books (ISBN) または Yahoo! / Open Food Facts / Jev (JAN) による情報取得
+      // 3. openBD / Google Books (ISBN) または Yahoo! / Open Food Facts / Jev / Gemini (JAN) による情報取得
       const itemData = await BarcodeService.lookup(code, {
         jevApiKey: state.config.jevApiKey,
         jevMaxAttributes: state.config.jevMaxAttributes,
+        geminiApiKey: state.config.geminiApiKey,
         candidateAttributes,
         yahooAppId: state.config.yahooAppId,
         existingRecord
@@ -595,24 +604,36 @@ class Application {
 
       let finalAttributes = formData.attributes || [];
 
-      // タイトルが入力されており、属性が未分類（空または市販品のみ）かつJev APIキーがある場合は登録前にJev分類を試行
+      // タイトルが入力されており、属性が未分類（空または市販品のみ）の場合は登録前にJevまたはGemini分類を試行
       if ((finalAttributes.length === 0 || (finalAttributes.length === 1 && finalAttributes[0] === '市販品')) &&
-          state.config.jevApiKey && formData.title && !formData.title.startsWith('市販品 (JAN:')) {
+          formData.title && !formData.title.startsWith('市販品 (JAN:')) {
         try {
           const candidateAttrs = await notion.getAttributeOptions();
           if (candidateAttrs.length > 0) {
-            const jevAttrs = await JevService.classify(
-              formData.title,
-              state.config.jevApiKey,
-              candidateAttrs,
-              { maxAttributes: state.config.jevMaxAttributes }
-            );
-            if (Array.isArray(jevAttrs) && jevAttrs.length > 0) {
-              finalAttributes = jevAttrs;
+            if (state.config.jevApiKey) {
+              const jevAttrs = await JevService.classify(
+                formData.title,
+                state.config.jevApiKey,
+                candidateAttrs,
+                { maxAttributes: state.config.jevMaxAttributes }
+              );
+              if (Array.isArray(jevAttrs) && jevAttrs.length > 0) {
+                finalAttributes = jevAttrs;
+              }
+            } else if (state.config.geminiApiKey) {
+              const geminiAttrs = await GeminiService.classifyAttributes(
+                formData.title,
+                state.config.geminiApiKey,
+                candidateAttrs,
+                state.config.jevMaxAttributes || 3
+              );
+              if (Array.isArray(geminiAttrs) && geminiAttrs.length > 0) {
+                finalAttributes = geminiAttrs;
+              }
             }
           }
-        } catch (jevErr) {
-          console.warn('[App] Jev classification on register failed:', jevErr);
+        } catch (clsErr) {
+          console.warn('[App] Classification on register failed:', clsErr);
         }
       }
 
@@ -897,8 +918,9 @@ class Application {
     const jevApiKey = document.getElementById('input-jev-api-key')?.value.trim();
     const jevMaxRaw = document.getElementById('input-jev-max-attributes')?.value;
     const jevMaxAttributes = jevMaxRaw ? Math.max(1, parseInt(jevMaxRaw, 10) || 3) : 3;
+    const geminiApiKey = document.getElementById('input-gemini-api-key')?.value.trim();
 
-    state.saveConfig({ apiKey, dbId, yahooAppId, jevApiKey, jevMaxAttributes, proxyMode: 'cloudflare' });
+    state.saveConfig({ apiKey, dbId, yahooAppId, jevApiKey, jevMaxAttributes, geminiApiKey, proxyMode: 'cloudflare' });
     if (apiKey && dbId) {
       notion.resolveDatabases(dbId).catch(() => {});
     }
@@ -929,8 +951,9 @@ class Application {
     const jevApiKey = document.getElementById('input-jev-api-key')?.value.trim();
     const jevMaxRaw = document.getElementById('input-jev-max-attributes')?.value;
     const jevMaxAttributes = jevMaxRaw ? Math.max(1, parseInt(jevMaxRaw, 10) || 3) : 3;
+    const geminiApiKey = document.getElementById('input-gemini-api-key')?.value.trim();
 
-    state.saveConfig({ apiKey, dbId, yahooAppId, jevApiKey, jevMaxAttributes, proxyMode: 'cloudflare' });
+    state.saveConfig({ apiKey, dbId, yahooAppId, jevApiKey, jevMaxAttributes, geminiApiKey, proxyMode: 'cloudflare' });
 
     try {
       const info = await notion.testConnection();
@@ -1045,10 +1068,49 @@ class Application {
   }
 
   /**
+   * Gemini 2.5 Flash 疎通テスト
+   */
+  async _testGeminiConnection() {
+    const btn = document.getElementById('btn-test-gemini');
+    const statusEl = document.getElementById('gemini-status-msg');
+    if (!btn || !statusEl) return;
+
+    const geminiApiKey = document.getElementById('input-gemini-api-key')?.value.trim();
+    if (!geminiApiKey) {
+      statusEl.textContent = 'Gemini APIキーを入力してください。未設定時は通常整形のみ動作します。';
+      statusEl.className = 'status-text text-warning';
+      return;
+    }
+
+    btn.disabled = true;
+    statusEl.textContent = 'Gemini API 接続テスト中 (gemini-2.5-flash)...';
+    statusEl.className = 'status-text text-muted';
+
+    try {
+      const res = await GeminiService.testConnection(geminiApiKey);
+      if (res.ok) {
+        statusEl.innerHTML = `✓ ${res.message}`;
+        statusEl.className = 'status-text text-success';
+        feedback.playSuccess();
+      } else {
+        statusEl.textContent = `✕ ${res.message}`;
+        statusEl.className = 'status-text text-danger';
+        feedback.playError();
+      }
+    } catch (e) {
+      statusEl.textContent = `✕ エラー: ${e.message}`;
+      statusEl.className = 'status-text text-danger';
+      feedback.playError();
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  /**
    * 別端末セットアップ用の共通URLを生成
    */
   _buildSetupUrl() {
-    const { dbId, apiKey, itemDbId, locationDbId, yahooAppId, jevApiKey, jevMaxAttributes } = state.config;
+    const { dbId, apiKey, itemDbId, locationDbId, yahooAppId, jevApiKey, jevMaxAttributes, geminiApiKey } = state.config;
     const effectiveDbId = dbId || itemDbId;
     if (!effectiveDbId || !apiKey) {
       return null;
@@ -1069,6 +1131,9 @@ class Application {
     }
     if (jevMaxAttributes) {
       targetUrl += `&jevmax=${encodeURIComponent(jevMaxAttributes)}`;
+    }
+    if (geminiApiKey) {
+      targetUrl += `&gemini=${encodeURIComponent(geminiApiKey)}`;
     }
     return targetUrl;
   }

@@ -570,6 +570,10 @@ class UIManager {
     if (jevMaxInput) {
       jevMaxInput.value = state.config.jevMaxAttributes || 3;
     }
+    const geminiInput = document.getElementById('input-gemini-api-key');
+    if (geminiInput) {
+      geminiInput.value = state.config.geminiApiKey || '';
+    }
 
     const detectedEl = document.getElementById('detected-db-id');
     if (detectedEl) {
@@ -717,6 +721,7 @@ class UIManager {
       if (cfg.yahooAppId) url.searchParams.set('yappid', cfg.yahooAppId);
       if (cfg.jevApiKey) url.searchParams.set('jev', cfg.jevApiKey);
       if (cfg.jevMaxAttributes) url.searchParams.set('jevmax', String(cfg.jevMaxAttributes));
+      if (cfg.geminiApiKey) url.searchParams.set('gemini', cfg.geminiApiKey);
     }
     return url.toString();
   }

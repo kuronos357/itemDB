@@ -7,6 +7,7 @@
  */
 
 import { JevService } from './jev.js';
+import { GeminiService } from './gemini.js';
 
 export class BarcodeService {
   /**
@@ -68,7 +69,17 @@ export class BarcodeService {
     // 3. 単独の販促ワード
     clean = clean.replace(/\b(?:送料無料|送料込|即日発送|即納|あす楽)\b/gi, '');
 
-    // 4. 余分な連続スペースの除去
+    // 4. ガジェット等のSEO長文タイトルの読点「、」スマートカット
+    if (clean.length > 38 && clean.includes('、')) {
+      const parts = clean.split('、');
+      let shortTitle = parts[0];
+      if (shortTitle.length < 24 && parts[1]) {
+        shortTitle += ' ' + parts[1];
+      }
+      clean = shortTitle;
+    }
+
+    // 5. 余分な連続スペースの除去
     clean = clean.replace(/\s+/g, ' ').trim();
 
     return clean || name.trim();
@@ -77,7 +88,7 @@ export class BarcodeService {
   /**
    * バーコードから商品・書籍情報を検索
    * @param {string} rawCode
-   * @param {{ jevApiKey?: string, candidateAttributes?: string[], jevMaxAttributes?: number, yahooAppId?: string, existingRecord?: any }} [options]
+   * @param {{ jevApiKey?: string, candidateAttributes?: string[], jevMaxAttributes?: number, yahooAppId?: string, geminiApiKey?: string, existingRecord?: any }} [options]
    * @returns {Promise<{
    *   code: string,
    *   isIsbn: boolean,
@@ -99,6 +110,18 @@ export class BarcodeService {
       const result = await this._lookupJan(code, options);
       const candidateAttrs = Array.isArray(options.candidateAttributes) ? options.candidateAttributes : [];
 
+      // 1. Gemini による商品名スマート要約（長文SEOタイトルの場合またはGemini有効時）
+      if (options.geminiApiKey && result.title && !result.title.startsWith('市販品 (JAN:')) {
+        try {
+          result.title = await GeminiService.cleanProductTitle(result.title, options.geminiApiKey);
+        } catch (geminiErr) {
+          console.warn('[BarcodeService] Gemini title cleanup error:', geminiErr);
+        }
+      }
+
+      // 2. 属性（カテゴリ）自動分類 (Jev 優先、フォールバックで Gemini)
+      let classifiedAttrs = [];
+
       if (options.jevApiKey && result.title && !result.title.startsWith('市販品 (JAN:') && candidateAttrs.length > 0) {
         try {
           const categories = await JevService.classify(
@@ -108,19 +131,34 @@ export class BarcodeService {
             { maxAttributes: options.jevMaxAttributes }
           );
           if (Array.isArray(categories) && categories.length > 0) {
-            result.attributes = categories;
-          } else if (!result.attributes || result.attributes.length === 0) {
-            result.attributes = candidateAttrs.includes('市販品') ? ['市販品'] : [];
+            classifiedAttrs = categories;
           }
         } catch (e) {
           console.warn('[BarcodeService] Jev classification error:', e);
-          if (!result.attributes || result.attributes.length === 0) {
-            result.attributes = candidateAttrs.includes('市販品') ? ['市販品'] : [];
-          }
         }
+      }
+
+      // Jevで分類できなかった場合、Geminiで属性分類を試行
+      if (classifiedAttrs.length === 0 && options.geminiApiKey && result.title && !result.title.startsWith('市販品 (JAN:') && candidateAttrs.length > 0) {
+        try {
+          const maxN = Math.max(1, parseInt(options.jevMaxAttributes, 10) || 3);
+          classifiedAttrs = await GeminiService.classifyAttributes(
+            result.title,
+            options.geminiApiKey,
+            candidateAttrs,
+            maxN
+          );
+        } catch (geminiClassifyErr) {
+          console.warn('[BarcodeService] Gemini classification error:', geminiClassifyErr);
+        }
+      }
+
+      if (classifiedAttrs.length > 0) {
+        result.attributes = classifiedAttrs;
       } else if (!result.attributes || result.attributes.length === 0) {
         result.attributes = candidateAttrs.includes('市販品') ? ['市販品'] : [];
       }
+
       return result;
     }
   }

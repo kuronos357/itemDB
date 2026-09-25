@@ -24,7 +24,18 @@ function cleanProductName(name) {
   // 3. 単独の販促ワード
   clean = clean.replace(/\b(?:送料無料|送料込|即日発送|即納|あす楽)\b/gi, '');
 
-  // 4. 余分な連続スペースの除去
+  // 4. ガジェット等のSEO長文タイトルの読点「、」スマートカット
+  // 読点「、」で区切られており、全体が38文字以上ある場合、後ろの用途（「〜対応」「〜向け」「ゴルフスイング」等）をカット
+  if (clean.length > 38 && clean.includes('、')) {
+    const parts = clean.split('、');
+    let shortTitle = parts[0];
+    if (shortTitle.length < 24 && parts[1]) {
+      shortTitle += ' ' + parts[1];
+    }
+    clean = shortTitle;
+  }
+
+  // 5. 余分な連続スペースの除去
   clean = clean.replace(/\s+/g, ' ').trim();
 
   return clean || name.trim();
@@ -68,7 +79,8 @@ export async function onRequest(context) {
   // 1. Yahoo!ショッピング商品検索API (v3)
   if (appId) {
     try {
-      const yUrl = `https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch?appid=${encodeURIComponent(appId)}&jan_code=${encodeURIComponent(code)}&results=3`;
+      // 5件取得して、最もSEOキーワード盛りの少ないシンプルなタイトルを自動選定
+      const yUrl = `https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch?appid=${encodeURIComponent(appId)}&jan_code=${encodeURIComponent(code)}&results=5`;
       const yRes = await fetch(yUrl, {
         headers: {
           "User-Agent": "itemDB-Cloudflare/1.0"
@@ -78,12 +90,23 @@ export async function onRequest(context) {
       if (yRes.ok) {
         const yData = await yRes.json();
         if (yData.hits && yData.hits.length > 0) {
-          const hit = yData.hits[0];
-          const rawTitle = hit.name || "";
-          const cleanedTitle = cleanProductName(rawTitle);
-          const brand = hit.brand?.name || hit.seller?.name || "";
-          const category = hit.genreCategory?.name || "";
-          let imageUrl = hit.image?.medium || hit.image?.small || null;
+          // 最短・最適タイトルの選定
+          let bestHit = yData.hits[0];
+          let bestCleaned = cleanProductName(bestHit.name || "");
+
+          for (let i = 1; i < yData.hits.length; i++) {
+            const h = yData.hits[i];
+            const c = cleanProductName(h.name || "");
+            if (c && c.length >= 8 && c.length < bestCleaned.length) {
+              bestHit = h;
+              bestCleaned = c;
+            }
+          }
+
+          const rawTitle = bestHit.name || "";
+          const brand = bestHit.brand?.name || bestHit.seller?.name || "";
+          const category = bestHit.genreCategory?.name || "";
+          let imageUrl = bestHit.image?.medium || bestHit.image?.small || null;
           if (imageUrl && imageUrl.startsWith("http://")) {
             imageUrl = imageUrl.replace("http://", "https://");
           }
@@ -92,11 +115,11 @@ export async function onRequest(context) {
             found: true,
             source: "yahoo",
             code,
-            title: cleanedTitle,
+            title: bestCleaned,
             rawTitle,
             brand,
             category,
-            price: hit.price || null,
+            price: bestHit.price || null,
             imageUrl
           }), {
             status: 200,
