@@ -34,7 +34,7 @@
       <div class="logo-section">
         <div style="display: flex; align-items: baseline; gap: 6px;">
           <h1 class="app-title">itemDB</h1>
-          <span class="badge" style="font-size: 0.7rem; padding: 1px 5px; background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 4px; font-weight: 500;">v37</span>
+          <span class="badge" style="font-size: 0.7rem; padding: 1px 5px; background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 4px; font-weight: 500;">v38</span>
         </div>
         <span class="app-subtitle">Logistics & Cache</span>
       </div>
@@ -206,7 +206,7 @@
             📱 別端末 (スマホ/Apple Watch) 連携
           </summary>
           <div class="mt-2" style="border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 8px;">
-            <p class="text-sub" style="font-size: 0.72rem; margin: 0 0 8px;">保存した設定（APIキー等）を他端末へ簡単に引き継げます。</p>
+            <p class="text-sub" style="font-size: 0.72rem; margin: 0 0 8px;">Notion接続キーのみを含む軽量URL/QRです。開いた端末でNotionから最新設定（Yahoo・Gemini等）を自動インポートします。</p>
             <div style="display: flex; gap: 8px;">
               <button id="btn-generate-setup-qr" class="btn btn-secondary btn-sm" style="flex: 1; font-size: 0.75rem;">
                 <span>設定用QRを生成</span>
@@ -217,13 +217,13 @@
             </div>
             <div id="setup-qr-wrapper" class="mt-2 hidden" style="text-align: center;">
               <div id="setup-qr-preview" style="display: inline-block; padding: 8px; background: #fff; border-radius: 6px;"></div>
-              <p class="text-sub mt-1" style="font-size: 0.7rem;">カメラで読み取ると自動設定されます。</p>
+              <p class="text-sub mt-1" style="font-size: 0.7rem;">カメラで読み取ると自動でNotionに接続し設定をインポートします。</p>
             </div>
           </div>
         </details>
       </div>
       <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-color); padding: 12px 16px;">
-        <span class="text-sub" style="font-size: 0.75rem; color: var(--text-muted);">itemDB Build 37</span>
+        <span class="text-sub" style="font-size: 0.75rem; color: var(--text-muted);">itemDB Build 38</span>
         <button id="btn-save-settings" class="btn btn-primary" style="padding: 8px 20px;">設定を保存</button>
       </div>
     </div>

@@ -360,16 +360,32 @@ class Application {
 
     state.saveConfig(updates);
 
-    // APIキーとDB IDの両方が揃っている場合は接続テストを実施
+    // APIキーとDB IDの両方が揃っている場合は接続テストおよびNotion設定自動インポートを実施
     if (state.isConfigured()) {
       try {
         const conn = await notion.testConnection();
-        if (conn.isDual) {
-          ui.showToast(`設定完了: 物品「${conn.itemDb.title}」⇄ 場所「${conn.locationDb.title}」に接続しました`, 'success', 4500);
-        } else {
-          ui.showToast(`設定完了: 「${conn.itemDb.title}」に接続しました`, 'success', 4000);
+
+        // Notionの設定テーブルからAPIキー等の設定を自動インポート
+        let importInfo = null;
+        try {
+          ui.setLoading(true, 'Notionから各種設定を同期中...');
+          importInfo = await notion.loadConfigFromNotion();
+        } catch (cfgErr) {
+          console.warn('[App] Notion設定自動インポートスキップ:', cfgErr);
         }
+
+        let toastMsg = conn.isDual
+          ? `設定完了: 物品「${conn.itemDb.title}」⇄ 場所「${conn.locationDb.title}」`
+          : `設定完了: 「${conn.itemDb.title}」`;
+
+        if (importInfo && importInfo.count > 0) {
+          toastMsg += ` (Notionから設定${importInfo.count}件を自動インポート)`;
+        }
+        ui.showToast(toastMsg, 'success', 5000);
         feedback.playSuccess();
+        if (ui && typeof ui._updateSyncBadges === 'function') {
+          ui._updateSyncBadges();
+        }
       } catch (err) {
         ui.showToast(`設定を保存しましたが接続確認でエラー: ${err.message}`, 'warning', 5000);
         feedback.playError();
@@ -1262,34 +1278,16 @@ class Application {
 
   /**
    * 別端末セットアップ用の共通URLを生成
+   * Notion親ページ/DBのIDとAPIキーのみを含める（各種APIキー等はNotion設定テーブルから自動同期）
    */
   _buildSetupUrl() {
-    const { dbId, apiKey, itemDbId, locationDbId, yahooAppId, jevApiKey, jevMaxAttributes, geminiApiKey } = state.config;
+    const { dbId, apiKey, itemDbId } = state.config;
     const effectiveDbId = dbId || itemDbId;
     if (!effectiveDbId || !apiKey) {
       return null;
     }
 
-    let targetUrl = `${window.location.origin}${window.location.pathname}?dbid=${encodeURIComponent(effectiveDbId)}&api=${encodeURIComponent(apiKey)}`;
-    if (itemDbId && itemDbId !== effectiveDbId) {
-      targetUrl += `&itemDbId=${encodeURIComponent(itemDbId)}`;
-    }
-    if (locationDbId) {
-      targetUrl += `&locid=${encodeURIComponent(locationDbId)}`;
-    }
-    if (yahooAppId) {
-      targetUrl += `&yappid=${encodeURIComponent(yahooAppId)}`;
-    }
-    if (jevApiKey) {
-      targetUrl += `&jev=${encodeURIComponent(jevApiKey)}`;
-    }
-    if (jevMaxAttributes) {
-      targetUrl += `&jevmax=${encodeURIComponent(jevMaxAttributes)}`;
-    }
-    if (geminiApiKey) {
-      targetUrl += `&gemini=${encodeURIComponent(geminiApiKey)}`;
-    }
-    return targetUrl;
+    return `${window.location.origin}${window.location.pathname}?dbid=${encodeURIComponent(effectiveDbId)}&api=${encodeURIComponent(apiKey)}`;
   }
 
   /**
