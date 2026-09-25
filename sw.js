@@ -3,7 +3,7 @@
  * アプリケーションシェルのオフラインキャッシュ
  */
 
-const CACHE_NAME = 'itemdb-cache-v42';
+const CACHE_NAME = 'itemdb-cache-v43';
 const ASSETS_TO_CACHE = [
   './',
   './style.css',

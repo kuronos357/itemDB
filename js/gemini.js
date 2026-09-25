@@ -110,23 +110,17 @@ export class GeminiService {
   static async cleanProductTitle(rawTitle, apiKey, model = null, throwOnError = false) {
     if (!rawTitle || !apiKey) return rawTitle || '';
 
-    const prompt = `あなたは商品管理データベースのデータクレンジング専門AIです。
-以下のECモールの出品商品名から、宣伝文句（送料無料、即納、セール、ポイント等）、店舗独自用語、用途（ゴルフ、防犯、撮影等）、対応機種一覧などの不要な修飾語を削ぎ落とし、
-純粋な「メーカー・ブランド名＋正式製品名＋型番（あれば容量・規格）」のみを簡潔に抽出してください。
+    const prompt = `Clean this Japanese e-commerce title. Remove promos (free shipping, sale, new, bulk count), store tags, and bracketed notes.
+Output ONLY the clean "Brand + Product Name + Model/Spec" in Japanese without quotes or explanations.
 
-【厳格なルール】
-- 余計な解説、引用符（「」""）、前置き、挨拶は一切出力しないでください。
-- 整形後の商品名文字列のみを1行で返してください。
-- 元の製品名がすでに簡潔な場合は、そのまま返してください。
-
-出品商品名:
+Title:
 ${rawTitle}`;
 
     try {
       const cleaned = await this._generate(prompt, apiKey, {
         model,
         temperature: 0.1,
-        maxOutputTokens: 100
+        maxOutputTokens: 60
       });
       // 引用符や改行の除去
       const result = cleaned.replace(/^["'「`]|["'」`]$/g, '').replace(/\r?\n.*/s, '').trim();
@@ -153,23 +147,17 @@ ${rawTitle}`;
       return [];
     }
 
-    const prompt = `商品名: "${title}"
-以下のカテゴリ候補リストの中から、この商品に当てはまるものを上位最大${maxN}件選んでJSON配列で出力してください。
-候補リストに該当するものがない場合は空配列 [] を返してください。
+    const prompt = `Select up to ${maxN} matching categories for this product from the allowed list.
+Product: "${title}"
+Allowed list: ${JSON.stringify(candidateAttributes)}
 
-候補リスト:
-${JSON.stringify(candidateAttributes)}
-
-【厳格なルール】
-- 候補リストに実在する文字列のみを使用してください。
-- 出力はJSON配列のみとし、コードブロックやMarkdown記法、解説は一切含めないでください。
-例: ["文房具", "日用品"]`;
+Output ONLY a JSON array containing exact matches from the allowed list, e.g. ["文房具", "日用品"]. If none match, output []. No extra text.`;
 
     try {
       const text = await this._generate(prompt, apiKey, {
         model,
         temperature: 0.1,
-        maxOutputTokens: 100
+        maxOutputTokens: 40
       });
       const match = text.match(/\[[\s\S]*\]/);
       if (match) {
