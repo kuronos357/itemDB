@@ -141,7 +141,8 @@ export async function onRequest(context) {
             brand,
             category,
             price: bestHit.price || null,
-            imageUrl
+            imageUrl,
+            url: bestHit.url || null
           };
 
           // キャッシュに保存
@@ -187,7 +188,8 @@ export async function onRequest(context) {
             title,
             brand,
             category: p.categories || "",
-            imageUrl
+            imageUrl,
+            url: `https://jp.openfoodfacts.org/product/${encodeURIComponent(code)}`
           };
           JAN_CACHE.set(code, { timestamp: Date.now(), data: offPayload });
 
@@ -309,7 +311,8 @@ export async function onRequest(context) {
             brand: publisher,
             author,
             category: "書籍",
-            imageUrl
+            imageUrl,
+            url: vol.infoLink || null
           };
           JAN_CACHE.set(code, { timestamp: Date.now(), data: gPayload });
 

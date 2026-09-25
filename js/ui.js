@@ -1000,6 +1000,29 @@ class UIManager {
     if (attrInput) attrInput.value = initialAttrs.join(', ');
     if (detailsInput) detailsInput.value = initialDetails;
 
+    // 元の取得名プレビュー・復元ボタンの制御 (LLMによる短縮・修正がある場合に元名称を明示)
+    const rawTitleWrapper = document.getElementById('barcode-raw-title-wrapper');
+    const rawTitleText = document.getElementById('barcode-raw-title-text');
+    const btnRestoreRaw = document.getElementById('btn-restore-raw-title');
+
+    if (rawTitleWrapper && rawTitleText) {
+      if (itemData.rawTitle && itemData.rawTitle !== initialTitle) {
+        rawTitleText.textContent = itemData.rawTitle;
+        rawTitleWrapper.classList.remove('hidden');
+        if (btnRestoreRaw) {
+          btnRestoreRaw.onclick = () => {
+            if (titleInput) {
+              titleInput.value = itemData.rawTitle;
+              this.showToast('取得元の名称を入力欄に復元しました', 'info', 2000);
+            }
+          };
+        }
+      } else {
+        rawTitleWrapper.classList.add('hidden');
+        rawTitleText.textContent = '';
+      }
+    }
+
     const attrHintEl = document.getElementById('barcode-attr-hint');
     if (attrHintEl) {
       if (itemData.isSecondBarcode) {

@@ -88,19 +88,31 @@ export class BarcodeService {
     let result = null;
     if (isBook) {
       result = await this._lookupIsbn(code, options);
+      if (result && !result.rawTitle && result.title) {
+        result.rawTitle = result.title;
+      }
     } else {
       result = await this._lookupJan(code, options);
+      if (result && !result.rawTitle && result.title) {
+        result.rawTitle = result.title;
+      }
       const candidateAttrs = Array.isArray(options.candidateAttributes) ? options.candidateAttributes : [];
+
+      // 分類に使用するテキスト（LLM整形前の元テキストの方が特徴量・用途語彙が豊富で正確に分類可能）
+      const textForClassify = result.rawTitle || result.title || '';
 
       // AI処理を並行実行 (商品名要約と属性分類を同時に行い、待ち時間を半減)
       const aiTasks = [];
 
-      // 1. 商品名スマート整形 (Gemini): タイトルが長文(30文字以上)または記号が多い場合に優先実行
+      // 1. 商品名スマート整形 (Gemini): タイトルが長文(25文字以上)または記号が多い場合に優先実行
       if (options.geminiApiKey && result.title && !result.title.startsWith('市販品 (JAN:') && result.title.length > 25) {
         aiTasks.push(
           GeminiService.cleanProductTitle(result.title, options.geminiApiKey, options.geminiModel)
             .then(cleanTitle => {
-              if (cleanTitle) result.title = cleanTitle;
+              if (cleanTitle) {
+                if (!result.rawTitle) result.rawTitle = result.title;
+                result.title = cleanTitle;
+              }
             })
             .catch(geminiErr => {
               console.warn('[BarcodeService] Gemini title cleanup error:', geminiErr);
@@ -108,14 +120,14 @@ export class BarcodeService {
         );
       }
 
-      // 2. 属性（カテゴリ）自動分類 (Jev / Gemini): タイトル整形と同時に並行して実行
-      if (candidateAttrs.length > 0 && result.title && !result.title.startsWith('市販品 (JAN:')) {
+      // 2. 属性（カテゴリ）自動分類 (Jev / Gemini): 修正前の豊富な情報量を持つテキストを用いて高精度分類
+      if (candidateAttrs.length > 0 && textForClassify && !textForClassify.startsWith('市販品 (JAN:')) {
         const classifyTask = async () => {
           let classified = [];
           if (options.jevApiKey) {
             try {
               const cats = await JevService.classify(
-                result.title,
+                textForClassify,
                 options.jevApiKey,
                 candidateAttrs,
                 { maxAttributes: options.jevMaxAttributes }
@@ -129,7 +141,7 @@ export class BarcodeService {
             try {
               const maxN = Math.max(1, parseInt(options.jevMaxAttributes, 10) || 3);
               const cats = await GeminiService.classifyAttributes(
-                result.title,
+                textForClassify,
                 options.geminiApiKey,
                 candidateAttrs,
                 maxN,
@@ -356,6 +368,7 @@ export class BarcodeService {
           if (data.brand) detailLines.push(`メーカー/ブランド: ${data.brand}`);
           if (data.category) detailLines.push(`カテゴリ: ${data.category}`);
           if (data.price) detailLines.push(`参考価格: ${Number(data.price).toLocaleString()}円`);
+          if (data.url) detailLines.push(`商品リンク: ${data.url}`);
 
           const attrs = [];
           if (data.category) {
@@ -368,9 +381,11 @@ export class BarcodeService {
             code: jan,
             isIsbn: data.category === '書籍' || data.source === 'googlebooks',
             title: this.cleanProductName(data.title),
+            rawTitle: data.rawTitle || data.title,
             author: data.author || data.brand || '',
             publisher: data.brand || '',
             coverUrl: data.imageUrl || null,
+            url: data.url || null,
             details: detailLines.join('\n'),
             attributes: attrs
           };
@@ -412,18 +427,22 @@ export class BarcodeService {
           const quantity = p.quantity || '';
           const coverUrl = p.image_url || p.image_front_url || null;
 
+          const offUrl = `https://jp.openfoodfacts.org/product/${encodeURIComponent(jan)}`;
           const detailLines = [`JAN: ${jan}`];
           if (brand) detailLines.push(`メーカー/ブランド: ${brand}`);
           if (quantity) detailLines.push(`容量/規格: ${quantity}`);
+          detailLines.push(`商品リンク: ${offUrl}`);
 
           if (title) {
             return {
               code: jan,
               isIsbn: false,
               title: this.cleanProductName(title),
+              rawTitle: title,
               author: brand,
               publisher: brand,
               coverUrl,
+              url: offUrl,
               details: detailLines.join('\n'),
               attributes: ['市販品']
             };

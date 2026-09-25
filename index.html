@@ -34,7 +34,7 @@
       <div class="logo-section">
         <div style="display: flex; align-items: baseline; gap: 6px;">
           <h1 class="app-title">itemDB</h1>
-          <span class="badge" style="font-size: 0.7rem; padding: 1px 5px; background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 4px; font-weight: 500;">v45</span>
+          <span class="badge" style="font-size: 0.7rem; padding: 1px 5px; background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 4px; font-weight: 500;">v46</span>
         </div>
         <span class="app-subtitle">Logistics & Cache</span>
       </div>
@@ -229,7 +229,7 @@
         </details>
       </div>
       <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-color); padding: 12px 16px;">
-        <span class="text-sub" style="font-size: 0.75rem; color: var(--text-muted);">itemDB Build 45</span>
+        <span class="text-sub" style="font-size: 0.75rem; color: var(--text-muted);">itemDB Build 46</span>
         <button id="btn-save-settings" class="btn btn-primary" style="padding: 8px 20px;">設定を保存</button>
       </div>
     </div>
@@ -370,7 +370,17 @@
 
         <!-- 品名 / タイトル入力 -->
         <div class="form-group">
-          <label for="barcode-item-title">品名 / 書名</label>
+          <div style="display: flex; justify-content: space-between; align-items: baseline;">
+            <label for="barcode-item-title">品名 / 書名</label>
+          </div>
+          <!-- 元の取得名 (LLM修正前の長文タイトル確認・復元用) -->
+          <div id="barcode-raw-title-wrapper" class="hidden" style="margin-bottom: 6px; font-size: 0.72rem; color: var(--text-muted); background: rgba(0,0,0,0.03); padding: 5px 8px; border-radius: 4px; border: 1px dashed var(--border-color); word-break: break-all; display: flex; justify-content: space-between; align-items: flex-start; gap: 6px;">
+            <div>
+              <span style="font-weight: 600; color: var(--text-secondary);">取得元の元名称: </span>
+              <span id="barcode-raw-title-text"></span>
+            </div>
+            <button type="button" id="btn-restore-raw-title" class="btn btn-sm" style="font-size: 0.68rem; padding: 2px 6px; white-space: nowrap; flex-shrink: 0;" title="元の名称を入力欄にコピー">元に戻す</button>
+          </div>
           <input type="text" id="barcode-item-title" class="form-input" placeholder="商品名または書籍名 (空欄時はコード番号)">
         </div>
 
