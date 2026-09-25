@@ -125,6 +125,7 @@ export class NotionClient {
         const err = new Error(msg);
         err.status = res.status;
         err.code = data?.code;
+        err.data = data;
         throw err;
       }
 
@@ -272,8 +273,8 @@ export class NotionClient {
           if (props['物理アドレス'] || props['現在地']) {
             itemDs = ds;
           }
-          // 「サービス名」や「設定」を持つ、または設定/config/apiを含むのは設定データソース
-          if ((props['サービス名'] && props['設定']) || /設定|config|settings|env|api/i.test(ds.name)) {
+          // 「サービス名」や「設定」を持つ、または設定/config/api/セットアップを含むのは設定データソース
+          if ((props['サービス名'] && props['設定']) || /設定|セットアップ|setup|config|settings|env|api/i.test(ds.name)) {
             configDs = ds;
           }
         } catch {}
@@ -292,7 +293,7 @@ export class NotionClient {
                || (itemDs ? dsList.find(ds => ds.id !== itemDs.id && ds.id !== configDs?.id) : null);
         }
         if (!configDs) {
-          configDs = dsList.find(ds => /設定|config|settings|api|環境変数/i.test(ds.name))
+          configDs = dsList.find(ds => /設定|セットアップ|setup|config|settings|api|環境変数/i.test(ds.name))
                   || (itemDs && locDs ? dsList.find(ds => ds.id !== itemDs.id && ds.id !== locDs.id) : null);
         }
       }
@@ -1220,15 +1221,49 @@ export class NotionClient {
     coverUrl = null,
     code = null
   }) {
+    // 既知の親DBコンテナIDと子データソースIDマッピング (目録/物理アドレス/セットアップ)
+    const KNOWN_PARENT_DB = '3dc5e314fd47802eb00af61c71937780';
+    const KNOWN_ITEM_DS = '3dc5e314fd47809088a5000b035baac0';
+    const KNOWN_LOC_DS = '3e05e314fd4780e2a08a000b4bc0c86a';
+    const KNOWN_CONFIG_DS = '3e65e314fd4780288a7d000bead0a79a';
+
     // 1. 作成先データソース / データベースIDの特定
-    let targetId = isItem
+    let rawTarget = isItem
       ? (state.config.itemDbId || state.config.dbId)
       : (state.config.locationDbId || state.config.dbId);
 
-    if (!targetId && state.config.dbId) {
-      targetId = state.config.dbId;
+    if (!rawTarget && state.config.dbId) {
+      rawTarget = state.config.dbId;
     }
-    if (!targetId) throw new Error('作成先データベースが未設定です。');
+    if (!rawTarget) throw new Error('作成先データベースが未設定です。');
+
+    let targetId = NotionClient.extractDatabaseId(rawTarget);
+
+    // ガード1: 既知親DB IDの場合は即座に子データソースIDへ自動解決
+    let isKnownParent = false;
+    if (targetId === KNOWN_PARENT_DB) {
+      targetId = isItem ? KNOWN_ITEM_DS : KNOWN_LOC_DS;
+      state.saveConfig({
+        itemDbId: KNOWN_ITEM_DS,
+        locationDbId: KNOWN_LOC_DS,
+        configDbId: KNOWN_CONFIG_DS
+      });
+      isKnownParent = true;
+    }
+
+    // ガード2: targetId がマルチデータソースDBコンテナの場合の自動解決
+    if (!isKnownParent) {
+      try {
+        const dbInfo = await this._request(`databases/${targetId}`, { method: 'GET' }).catch(() => null);
+        if (dbInfo?.data_sources && dbInfo.data_sources.length >= 2) {
+          const resolved = await this.resolveDatabases(targetId);
+          const resolvedId = isItem ? resolved.itemDb?.id : resolved.locationDb?.id;
+          if (resolvedId) {
+            targetId = resolvedId;
+          }
+        }
+      } catch {}
+    }
 
     // 2. スキーマ取得
     let schema = null;
@@ -1239,7 +1274,7 @@ export class NotionClient {
     }
     const props = schema?.properties || {};
 
-    // 3. プロパティの構築 (確実に存在するプロパティのみ、型を厳格に適合)
+    // 3. プロパティの構築 (実在するプロパティのみをホワイトリスト形式で厳格に適合)
     const properties = {};
 
     // タイトル (必須)
@@ -1251,13 +1286,23 @@ export class NotionClient {
     };
 
     // 詳細 (rich_text)
-    if (details) {
+    // バーコード(code)がある場合は詳細テキストの先頭に確実に含める（NotionスキーマにJAN列がなくても詳細欄で完全保持＆検索可能）
+    let fullDetails = details ? String(details).trim() : '';
+    if (code) {
+      const strCode = String(code).trim();
+      if (!fullDetails.includes(strCode)) {
+        const codeLabel = (/^(978|979)/.test(strCode)) ? 'ISBN' : 'JAN';
+        fullDetails = fullDetails ? `${codeLabel}: ${strCode}\n${fullDetails}` : `${codeLabel}: ${strCode}`;
+      }
+    }
+
+    if (fullDetails) {
       const detailsProp = props['詳細']
         || Object.values(props).find(p => p.type === 'rich_text' && p.name === '詳細')
         || Object.values(props).find(p => p.type === 'rich_text' && !['ID', 'URL'].includes(p.name));
       if (detailsProp && detailsProp.type === 'rich_text') {
         properties[detailsProp.name] = {
-          rich_text: [{ text: { content: String(details) } }]
+          rich_text: [{ text: { content: fullDetails } }]
         };
       }
     }
@@ -1297,22 +1342,7 @@ export class NotionClient {
       properties['アクティブ'] = { checkbox: true };
     }
 
-    // JANコード / バーコード (rich_text / number)
-    if (code) {
-      const barcodeProp = props['JANコード']
-        || props['JAN']
-        || props['バーコード']
-        || Object.values(props).find(p => ['janコード', 'jan', 'バーコード', 'barcode'].includes(p.name.toLowerCase()));
-      if (barcodeProp && barcodeProp.type !== 'title') {
-        const strCode = String(code).trim();
-        if (barcodeProp.type === 'rich_text') {
-          properties[barcodeProp.name] = { rich_text: [{ text: { content: strCode } }] };
-        } else if (barcodeProp.type === 'number') {
-          const num = Number(strCode.replace(/\D/g, ''));
-          if (!isNaN(num)) properties[barcodeProp.name] = { number: num };
-        }
-      }
-    }
+    // ※重要: Notionスキーマに実在しない「JAN」「JANコード」「バーコード」等の架空列は送信しません（HTTP 400エラー防止）。コードは「詳細」列に保持されます。
 
     // 4. parent の構築 (Notion 2025-09-03 data_source_id / database_id)
     const targetUuid = NotionClient.formatUuid(targetId);
@@ -1320,55 +1350,56 @@ export class NotionClient {
     let res = null;
     let lastError = null;
 
-    // 優先順位1: data_source_id (Notion 2025-09-03 マルチデータソースDB標準)
-    try {
-      res = await this._request('pages', {
+    const tryPostPage = async (parentObj, propsObj) => {
+      return await this._request('pages', {
         method: 'POST',
         body: JSON.stringify({
-          parent: { type: 'data_source_id', data_source_id: targetUuid },
-          properties
+          parent: parentObj,
+          properties: propsObj
         })
       });
+    };
+
+    // 優先順位1: data_source_id (Notion 2025-09-03 マルチデータソースDB標準)
+    try {
+      res = await tryPostPage({ type: 'data_source_id', data_source_id: targetUuid }, properties);
     } catch (err1) {
       lastError = err1;
-      console.warn('[NotionClient] data_source_id failed, trying database_id:', err1.message);
+      console.warn('[NotionClient] data_source_id failed:', err1.message);
+
+      // 自己修復A: 親DB IDだった場合、エラー本文内の child_data_source_ids から子データソースIDを抽出して即再試行
+      const childDsIds = err1.data?.additional_data?.child_data_source_ids;
+      if (Array.isArray(childDsIds) && childDsIds.length > 0) {
+        const healedDsId = isItem ? childDsIds[0] : (childDsIds[1] || childDsIds[0]);
+        console.info('[NotionClient] child_data_source_idsから子データソースIDを自動修復して再試行:', healedDsId);
+        try {
+          res = await tryPostPage({ type: 'data_source_id', data_source_id: healedDsId }, properties);
+          state.saveConfig(isItem ? { itemDbId: healedDsId.replace(/-/g, '') } : { locationDbId: healedDsId.replace(/-/g, '') });
+        } catch (healErr) {
+          lastError = healErr;
+        }
+      }
 
       // 優先順位2: database_id (従来の単一DB)
-      try {
-        res = await this._request('pages', {
-          method: 'POST',
-          body: JSON.stringify({
-            parent: { type: 'database_id', database_id: targetUuid },
-            properties
-          })
-        });
-      } catch (err2) {
-        lastError = err2;
-        console.warn('[NotionClient] database_id failed, trying minimal title only:', err2.message);
-
-        // 優先順位3: タイトルのみの最小構成 (プロパティ不一致の完全排除)
-        const minimalProps = {
-          [titlePropName]: properties[titlePropName]
-        };
+      if (!res) {
         try {
-          res = await this._request('pages', {
-            method: 'POST',
-            body: JSON.stringify({
-              parent: { type: 'data_source_id', data_source_id: targetUuid },
-              properties: minimalProps
-            })
-          });
-        } catch (err3) {
+          res = await tryPostPage({ type: 'database_id', database_id: targetUuid }, properties);
+        } catch (err2) {
+          lastError = err2;
+          console.warn('[NotionClient] database_id failed, trying minimal title only:', err2.message);
+
+          // 優先順位3: タイトルのみの最小構成 (プロパティ不一致の完全排除)
+          const minimalProps = {
+            [titlePropName]: properties[titlePropName]
+          };
           try {
-            res = await this._request('pages', {
-              method: 'POST',
-              body: JSON.stringify({
-                parent: { type: 'database_id', database_id: targetUuid },
-                properties: minimalProps
-              })
-            });
-          } catch (err4) {
-            lastError = err4;
+            res = await tryPostPage({ type: 'data_source_id', data_source_id: targetUuid }, minimalProps);
+          } catch (err3) {
+            try {
+              res = await tryPostPage({ type: 'database_id', database_id: targetUuid }, minimalProps);
+            } catch (err4) {
+              lastError = err4;
+            }
           }
         }
       }

@@ -932,7 +932,7 @@ class Application {
   /**
    * 設定モーダルから設定を保存
    */
-  _saveSettingsFromModal() {
+  async _saveSettingsFromModal() {
     const apiKey = document.getElementById('input-api-key')?.value.trim();
     const dbId = document.getElementById('input-db-id')?.value.trim();
     const yahooAppId = document.getElementById('input-yahoo-app-id')?.value.trim();
@@ -943,12 +943,18 @@ class Application {
     const geminiModel = document.getElementById('input-gemini-model')?.value.trim() || 'gemini-3.1-flash-lite';
 
     state.saveConfig({ apiKey, dbId, yahooAppId, jevApiKey, jevMaxAttributes, geminiApiKey, geminiModel, proxyMode: 'cloudflare' });
-    if (apiKey && dbId) {
-      notion.resolveDatabases(dbId).catch(() => {});
-    }
 
     document.getElementById('settings-modal')?.classList.add('hidden');
     ui.showToast('設定を保存しました', 'success');
+
+    if (apiKey && dbId) {
+      try {
+        await notion.resolveDatabases(dbId);
+        ui._updateSyncBadges();
+      } catch (e) {
+        console.warn('[App] 設定保存後のDB自動解決警告:', e.message);
+      }
+    }
 
     if (state.currentMode === AppMode.HOME) {
       this.switchMode(AppMode.HOME);

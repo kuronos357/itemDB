@@ -88,19 +88,39 @@ class StateStore extends EventTarget {
     // 既知の「目録(物品)」と「物理アドレス(場所)」および親コンテナDBの自動補正
     const KNOWN_ITEM_DS = '3dc5e314fd47809088a5000b035baac0';
     const KNOWN_LOC_DS = '3e05e314fd4780e2a08a000b4bc0c86a';
+    const KNOWN_CONFIG_DS = '3e65e314fd4780288a7d000bead0a79a';
     const KNOWN_PARENT_DB = '3dc5e314fd47802eb00af61c71937780';
 
     const cleanDb = (this.config.dbId || '').replace(/-/g, '');
+    const cleanConfig = (this.config.configDbId || '').replace(/-/g, '');
 
     // dbId が親コンテナではなく子データソース (目録 or 物理アドレス) になっていた場合、親DBに補正
     if (cleanDb === KNOWN_ITEM_DS || cleanDb === KNOWN_LOC_DS) {
       console.info('[State] dbId を親データベースIDに自動修復します');
       updates.dbId = KNOWN_PARENT_DB;
-      if (!cleanItem) updates.itemDbId = KNOWN_ITEM_DS;
-      if (!cleanLoc) updates.locationDbId = KNOWN_LOC_DS;
+      if (!cleanItem || cleanItem === KNOWN_PARENT_DB) updates.itemDbId = KNOWN_ITEM_DS;
+      if (!cleanLoc || cleanLoc === KNOWN_PARENT_DB) updates.locationDbId = KNOWN_LOC_DS;
       changed = true;
-    } else if (cleanDb === KNOWN_PARENT_DB && (!cleanItem || !cleanLoc)) {
+    } else if (cleanDb === KNOWN_PARENT_DB) {
+      if (!cleanItem || cleanItem === KNOWN_PARENT_DB) {
+        updates.itemDbId = KNOWN_ITEM_DS;
+        changed = true;
+      }
+      if (!cleanLoc || cleanLoc === KNOWN_PARENT_DB) {
+        updates.locationDbId = KNOWN_LOC_DS;
+        changed = true;
+      }
+      if (!cleanConfig || cleanConfig === KNOWN_PARENT_DB) {
+        updates.configDbId = KNOWN_CONFIG_DS;
+        changed = true;
+      }
+    }
+
+    if (cleanItem === KNOWN_PARENT_DB) {
       updates.itemDbId = KNOWN_ITEM_DS;
+      changed = true;
+    }
+    if (cleanLoc === KNOWN_PARENT_DB) {
       updates.locationDbId = KNOWN_LOC_DS;
       changed = true;
     }
@@ -226,5 +246,5 @@ class StateStore extends EventTarget {
   }
 }
 
-export const APP_VERSION = 'v44';
+export const APP_VERSION = 'v45';
 export const state = new StateStore();
