@@ -50,10 +50,34 @@ export class BarcodeService {
     return false;
   }
 
+  static cleanProductName(name) {
+    if (!name || typeof name !== 'string') return '';
+    let clean = name.trim();
+
+    // 1. 墨付き括弧や角括弧で囲まれた販促ワードを削除
+    clean = clean.replace(/【(?:送料無料|送料込|公式|正規品|即納|即日発送|あす楽|新品|ポイント\d+倍|訳あり|アウトレット|特価|セール|ケース販売|まとめ買い|限定|日本製|大容量|業務用|詰替|つめかえ)[^】]*】/gi, '');
+    clean = clean.replace(/\[(?:送料無料|送料込|公式|正規品|即納|即日発送|あす楽|新品|ポイント\d+倍|訳あり|アウトレット|特価|セール)[^\]]*\]/gi, '');
+
+    // 一般的な括弧先頭のプロモーション
+    clean = clean.replace(/^【[^】]+】\s*/g, '');
+    clean = clean.replace(/^\[[^\]]+\]\s*/g, '');
+
+    // 2. 記号で囲まれた販促語
+    clean = clean.replace(/[★☆◆◇■▲▼◎][^★☆◆◇■▲▼◎]+[★☆◆◇■▲▼◎]/g, '');
+
+    // 3. 単独の販促ワード
+    clean = clean.replace(/\b(?:送料無料|送料込|即日発送|即納|あす楽)\b/gi, '');
+
+    // 4. 余分な連続スペースの除去
+    clean = clean.replace(/\s+/g, ' ').trim();
+
+    return clean || name.trim();
+  }
+
   /**
    * バーコードから商品・書籍情報を検索
    * @param {string} rawCode
-   * @param {{ jevApiKey?: string, candidateAttributes?: string[], jevMaxAttributes?: number }} [options]
+   * @param {{ jevApiKey?: string, candidateAttributes?: string[], jevMaxAttributes?: number, yahooAppId?: string, existingRecord?: any }} [options]
    * @returns {Promise<{
    *   code: string,
    *   isIsbn: boolean,
@@ -72,7 +96,7 @@ export class BarcodeService {
     if (isBook) {
       return await this._lookupIsbn(code);
     } else {
-      const result = await this._lookupJan(code);
+      const result = await this._lookupJan(code, options);
       const candidateAttrs = Array.isArray(options.candidateAttributes) ? options.candidateAttributes : [];
 
       if (options.jevApiKey && result.title && !result.title.startsWith('市販品 (JAN:') && candidateAttrs.length > 0) {
@@ -85,14 +109,16 @@ export class BarcodeService {
           );
           if (Array.isArray(categories) && categories.length > 0) {
             result.attributes = categories;
-          } else {
+          } else if (!result.attributes || result.attributes.length === 0) {
             result.attributes = candidateAttrs.includes('市販品') ? ['市販品'] : [];
           }
         } catch (e) {
           console.warn('[BarcodeService] Jev classification error:', e);
-          result.attributes = candidateAttrs.includes('市販品') ? ['市販品'] : [];
+          if (!result.attributes || result.attributes.length === 0) {
+            result.attributes = candidateAttrs.includes('市販品') ? ['市販品'] : [];
+          }
         }
-      } else {
+      } else if (!result.attributes || result.attributes.length === 0) {
         result.attributes = candidateAttrs.includes('市販品') ? ['市販品'] : [];
       }
       return result;
@@ -188,10 +214,67 @@ export class BarcodeService {
   }
 
   /**
-   * JANコードによる一般商品情報の検索 (Open Food Facts / Google Books / フォールバック)
+   * JANコードによる一般商品情報の検索 (Yahoo!ショッピングAPI / Open Food Facts / Google Books / Notion既存情報 / フォールバック)
    */
-  static async _lookupJan(jan) {
-    // 1. Open Food Facts API (食品・日用品の一部をカバー)
+  static async _lookupJan(jan, options = {}) {
+    // 1. Cloudflare Functions /api/jan (Yahoo!ショッピングAPI & サーバーサイド検索)
+    try {
+      const isLocal = (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'));
+      const janEndpoint = isLocal ? 'https://itemdb.pages.dev/api/jan' : '/api/jan';
+
+      const queryParams = new URLSearchParams({ code: jan });
+      if (options.yahooAppId) {
+        queryParams.set('appid', options.yahooAppId);
+      }
+
+      const res = await fetch(`${janEndpoint}?${queryParams.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.found && data.title) {
+          const detailLines = [`JAN: ${jan}`];
+          if (data.brand) detailLines.push(`メーカー/ブランド: ${data.brand}`);
+          if (data.category) detailLines.push(`カテゴリ: ${data.category}`);
+          if (data.price) detailLines.push(`参考価格: ${Number(data.price).toLocaleString()}円`);
+
+          const attrs = [];
+          if (data.category) {
+            attrs.push(data.category);
+          } else {
+            attrs.push('市販品');
+          }
+
+          return {
+            code: jan,
+            isIsbn: data.category === '書籍' || data.source === 'googlebooks',
+            title: this.cleanProductName(data.title),
+            author: data.author || data.brand || '',
+            publisher: data.brand || '',
+            coverUrl: data.imageUrl || null,
+            details: detailLines.join('\n'),
+            attributes: attrs
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('[BarcodeService] /api/jan lookup error:', e);
+    }
+
+    // 2. 過去にNotionへ登録した同一JANコードの既存情報があれば優先補完
+    if (options.existingRecord) {
+      const ex = options.existingRecord;
+      return {
+        code: jan,
+        isIsbn: false,
+        title: ex.name || '',
+        author: ex.author || '',
+        publisher: ex.publisher || '',
+        coverUrl: ex.coverUrl || null,
+        details: ex.details || `JAN: ${jan}`,
+        attributes: (ex.attributes && ex.attributes.length > 0) ? ex.attributes : ['市販品']
+      };
+    }
+
+    // 3. Open Food Facts API 直接フォールバック (食品・日用品の一部をカバー)
     try {
       const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(jan)}.json`, {
         headers: { 'User-Agent': 'itemDB - Web - 1.0' }
@@ -209,23 +292,25 @@ export class BarcodeService {
           if (brand) detailLines.push(`メーカー/ブランド: ${brand}`);
           if (quantity) detailLines.push(`容量/規格: ${quantity}`);
 
-          return {
-            code: jan,
-            isIsbn: false,
-            title: title || '',
-            author: brand,
-            publisher: brand,
-            coverUrl,
-            details: detailLines.join('\n'),
-            attributes: ['市販品']
-          };
+          if (title) {
+            return {
+              code: jan,
+              isIsbn: false,
+              title: this.cleanProductName(title),
+              author: brand,
+              publisher: brand,
+              coverUrl,
+              details: detailLines.join('\n'),
+              attributes: ['市販品']
+            };
+          }
         }
       }
     } catch (e) {
       console.warn('[BarcodeService] Open Food Facts lookup error:', e);
     }
 
-    // 2. 書籍系JAN（978始まり以外の書籍や雑誌コード等）の可能性をGoogle Booksで確認
+    // 4. 書籍系JAN（978始まり以外の書籍や雑誌コード等）の可能性をGoogle Booksで確認
     try {
       const gRes = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(jan)}`);
       if (gRes.ok) {
@@ -262,7 +347,7 @@ export class BarcodeService {
       // 無視
     }
 
-    // 未ヒット時のフォールバック（手入力を促す）
+    // 5. 未ヒット時のフォールバック（手入力を促す）
     return {
       code: jan,
       isIsbn: false,

@@ -6,6 +6,8 @@
  * 本家 https://api.notion.com/v1/... へサーバー側で中継してCORSヘッダーを付与します。
  */
 
+import { onRequest as onJanRequest } from "./jan.js";
+
 export async function onRequest(context) {
   const { request, params } = context;
 
@@ -24,6 +26,11 @@ export async function onRequest(context) {
 
   // [[path]] で受け取ったパス配列を結合 (例: ["databases", "3dc5..."])
   const path = Array.isArray(params.path) ? params.path.join("/") : (params.path || "");
+
+  // JANコード検索API (/api/jan)
+  if (path === "jan" || path === "jan/") {
+    return await onJanRequest(context);
+  }
 
   // Jev (TypeSafe AI) プロキシ (/api/jev)
   if (path === "jev" || path === "jev/") {

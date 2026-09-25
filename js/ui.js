@@ -558,6 +558,10 @@ class UIManager {
 
     document.getElementById('input-api-key').value = apiKey || '';
     document.getElementById('input-db-id').value = dbId || '';
+    const yahooInput = document.getElementById('input-yahoo-app-id');
+    if (yahooInput) {
+      yahooInput.value = state.config.yahooAppId || '';
+    }
     const jevInput = document.getElementById('input-jev-api-key');
     if (jevInput) {
       jevInput.value = state.config.jevApiKey || '';
@@ -710,6 +714,7 @@ class UIManager {
       if (cfg.itemDbId || cfg.dbId) url.searchParams.set('dbid', cfg.itemDbId || cfg.dbId);
       if (cfg.locationDbId) url.searchParams.set('locid', cfg.locationDbId);
       if (cfg.proxyMode) url.searchParams.set('proxy', cfg.proxyMode);
+      if (cfg.yahooAppId) url.searchParams.set('yappid', cfg.yahooAppId);
       if (cfg.jevApiKey) url.searchParams.set('jev', cfg.jevApiKey);
       if (cfg.jevMaxAttributes) url.searchParams.set('jevmax', String(cfg.jevMaxAttributes));
     }
@@ -930,10 +935,16 @@ class UIManager {
       }
     }
 
-    // フォーム初期値
-    if (titleInput) titleInput.value = itemData.title || '';
-    if (attrInput) attrInput.value = (itemData.attributes || []).join(', ');
-    if (detailsInput) detailsInput.value = itemData.details || '';
+    // フォーム初期値 (未ヒット時はNotion既存レコードの情報で自動補完)
+    const initialTitle = itemData.title || (duplicateRecord ? duplicateRecord.name : '');
+    const initialAttrs = (itemData.attributes && itemData.attributes.length > 0)
+      ? itemData.attributes
+      : (duplicateRecord?.attributes || []);
+    const initialDetails = itemData.details || (duplicateRecord?.details || '');
+
+    if (titleInput) titleInput.value = initialTitle;
+    if (attrInput) attrInput.value = initialAttrs.join(', ');
+    if (detailsInput) detailsInput.value = initialDetails;
 
     // 登録ボタンのハンドラ配線
     const submitBtn = document.getElementById('btn-submit-barcode');

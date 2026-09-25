@@ -95,6 +95,10 @@ class Application {
       this._testConnection();
     });
 
+    document.getElementById('btn-test-yahoo')?.addEventListener('click', () => {
+      this._testYahooConnection();
+    });
+
     document.getElementById('btn-test-jev')?.addEventListener('click', () => {
       this._testJevConnection();
     });
@@ -274,17 +278,19 @@ class Application {
     const api = params.get('api') || params.get('apiKey') || params.get('api_key') || params.get('key') || params.get('token') || params.get('secret');
     const locid = params.get('locationDbId') || params.get('locid') || params.get('location_db_id') || params.get('locationdb');
     const proxy = params.get('proxy') || params.get('proxyMode');
+    const yappid = params.get('yappid') || params.get('yahooAppId') || params.get('yahoo');
     const jev = params.get('jev') || params.get('jevApiKey') || params.get('jev_api_key');
     const jevMax = params.get('jevmax') || params.get('jev_max') || params.get('jevMax');
     const id = params.get('id');
 
-    if (dbid || api || jev || jevMax) {
+    if (dbid || api || jev || jevMax || yappid) {
       const hasDirectId = (id && /^\d+$/.test(id));
       await this._applySetupConfig({
         dbId: dbid,
         apiKey: api,
         locationDbId: locid,
         proxyMode: proxy,
+        yahooAppId: yappid,
         jevApiKey: jev,
         jevMaxAttributes: jevMax ? parseInt(jevMax, 10) : undefined
       }, null, !hasDirectId);
@@ -328,6 +334,7 @@ class Application {
     if (config.locationDbId) updates.locationDbId = config.locationDbId;
     if (config.proxyMode) updates.proxyMode = config.proxyMode;
     if (config.customProxyUrl) updates.customProxyUrl = config.customProxyUrl;
+    if (config.yahooAppId) updates.yahooAppId = config.yahooAppId;
     if (config.jevApiKey) updates.jevApiKey = config.jevApiKey;
     if (config.jevMaxAttributes !== undefined) updates.jevMaxAttributes = config.jevMaxAttributes;
 
@@ -548,11 +555,13 @@ class Application {
       // 2. 既存の属性オプション（Notion DBの属性選択肢）を取得
       const candidateAttributes = await notion.getAttributeOptions();
 
-      // 3. openBD / Google Books (ISBN) または Open Food Facts / Jev (JAN) による情報取得
+      // 3. openBD / Google Books (ISBN) または Yahoo! / Open Food Facts / Jev (JAN) による情報取得
       const itemData = await BarcodeService.lookup(code, {
         jevApiKey: state.config.jevApiKey,
         jevMaxAttributes: state.config.jevMaxAttributes,
-        candidateAttributes
+        candidateAttributes,
+        yahooAppId: state.config.yahooAppId,
+        existingRecord
       });
 
       ui.setLoading(false);
@@ -884,11 +893,12 @@ class Application {
   _saveSettingsFromModal() {
     const apiKey = document.getElementById('input-api-key')?.value.trim();
     const dbId = document.getElementById('input-db-id')?.value.trim();
+    const yahooAppId = document.getElementById('input-yahoo-app-id')?.value.trim();
     const jevApiKey = document.getElementById('input-jev-api-key')?.value.trim();
     const jevMaxRaw = document.getElementById('input-jev-max-attributes')?.value;
     const jevMaxAttributes = jevMaxRaw ? Math.max(1, parseInt(jevMaxRaw, 10) || 3) : 3;
 
-    state.saveConfig({ apiKey, dbId, jevApiKey, jevMaxAttributes, proxyMode: 'cloudflare' });
+    state.saveConfig({ apiKey, dbId, yahooAppId, jevApiKey, jevMaxAttributes, proxyMode: 'cloudflare' });
     if (apiKey && dbId) {
       notion.resolveDatabases(dbId).catch(() => {});
     }
@@ -915,11 +925,12 @@ class Application {
 
     const apiKey = document.getElementById('input-api-key')?.value.trim();
     const dbId = document.getElementById('input-db-id')?.value.trim();
+    const yahooAppId = document.getElementById('input-yahoo-app-id')?.value.trim();
     const jevApiKey = document.getElementById('input-jev-api-key')?.value.trim();
     const jevMaxRaw = document.getElementById('input-jev-max-attributes')?.value;
     const jevMaxAttributes = jevMaxRaw ? Math.max(1, parseInt(jevMaxRaw, 10) || 3) : 3;
 
-    state.saveConfig({ apiKey, dbId, jevApiKey, jevMaxAttributes, proxyMode: 'cloudflare' });
+    state.saveConfig({ apiKey, dbId, yahooAppId, jevApiKey, jevMaxAttributes, proxyMode: 'cloudflare' });
 
     try {
       const info = await notion.testConnection();
@@ -941,6 +952,52 @@ class Application {
       }
     } catch (err) {
       statusEl.textContent = `接続失敗: ${err.message}`;
+      statusEl.className = 'status-text text-danger';
+      feedback.playError();
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  /**
+   * Yahoo! ショッピング API 疎通テスト
+   */
+  async _testYahooConnection() {
+    const btn = document.getElementById('btn-test-yahoo');
+    const statusEl = document.getElementById('yahoo-status-msg');
+    if (!btn || !statusEl) return;
+
+    const yahooAppId = document.getElementById('input-yahoo-app-id')?.value.trim();
+    if (!yahooAppId) {
+      statusEl.textContent = 'Yahoo! Client ID (appid) を入力してください。未設定時はフォールバック検索のみ動作します。';
+      statusEl.className = 'status-text text-warning';
+      return;
+    }
+
+    btn.disabled = true;
+    statusEl.textContent = 'Yahoo! API 接続テスト中 (伊藤園 お〜いお茶: 4901085089309 で検索)...';
+    statusEl.className = 'status-text text-muted';
+
+    try {
+      const isLocal = (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'));
+      const janEndpoint = isLocal ? 'https://itemdb.pages.dev/api/jan' : '/api/jan';
+
+      const res = await fetch(`${janEndpoint}?code=4901085089309&appid=${encodeURIComponent(yahooAppId)}`);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status} ${res.statusText}`);
+      }
+      const data = await res.json();
+      if (data.found && data.title) {
+        statusEl.innerHTML = `✓ 接続成功！<br>「${data.title}」を取得できました（ブランド: ${data.brand || 'なし'}）`;
+        statusEl.className = 'status-text text-success';
+        feedback.playSuccess();
+      } else {
+        statusEl.textContent = `✕ 取得失敗: ${data.message || '商品が見つかりませんでした'}`;
+        statusEl.className = 'status-text text-danger';
+        feedback.playError();
+      }
+    } catch (err) {
+      statusEl.textContent = `✕ 接続エラー: ${err.message}`;
       statusEl.className = 'status-text text-danger';
       feedback.playError();
     } finally {
@@ -991,7 +1048,7 @@ class Application {
    * 別端末セットアップ用の共通URLを生成
    */
   _buildSetupUrl() {
-    const { dbId, apiKey, itemDbId, locationDbId, jevApiKey, jevMaxAttributes } = state.config;
+    const { dbId, apiKey, itemDbId, locationDbId, yahooAppId, jevApiKey, jevMaxAttributes } = state.config;
     const effectiveDbId = dbId || itemDbId;
     if (!effectiveDbId || !apiKey) {
       return null;
@@ -1003,6 +1060,9 @@ class Application {
     }
     if (locationDbId) {
       targetUrl += `&locid=${encodeURIComponent(locationDbId)}`;
+    }
+    if (yahooAppId) {
+      targetUrl += `&yappid=${encodeURIComponent(yahooAppId)}`;
     }
     if (jevApiKey) {
       targetUrl += `&jev=${encodeURIComponent(jevApiKey)}`;

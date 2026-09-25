@@ -107,6 +107,14 @@
         </div>
 
         <div class="form-group mt-2">
+          <label for="input-yahoo-app-id">Yahoo! Client ID (appid) <small style="color: var(--text-muted); font-size: 0.75rem;">[推奨 / 任意]</small></label>
+          <input type="text" id="input-yahoo-app-id" class="form-input" placeholder="dj00aiZpPVhYWFhYWFhYWFhYW..." autocomplete="off">
+          <span class="text-sub">
+            日本の市販品JANコードから商品名・メーカー・画像を高精度に自動取得します（<a href="https://developer.yahoo.co.jp/" target="_blank" rel="noopener" style="color: var(--color-item); text-decoration: underline;">Yahoo!デベロッパーネットワーク</a>で無料・即時発行可能 / 1日5万回無料）。
+          </span>
+        </div>
+
+        <div class="form-group mt-2">
           <label for="input-jev-api-key">Jev APIキー (TypeSafe AI) <small style="color: var(--text-muted); font-size: 0.75rem;">[任意]</small></label>
           <input type="password" id="input-jev-api-key" class="form-input" placeholder="jev_xxxxxxxxxxxxxxxx">
           <span class="text-sub">JANコード読み取り時、商品名からNotion属性を高精度に自動分類します。</span>
@@ -120,14 +128,18 @@
 
         <div class="form-group mt-2">
           <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-            <button id="btn-test-connection" class="btn btn-secondary" style="flex: 1;">
+            <button id="btn-test-connection" class="btn btn-secondary" style="flex: 1; min-width: 110px;">
               <span>Notion 疎通テスト</span>
             </button>
-            <button id="btn-test-jev" class="btn btn-secondary" style="flex: 1;">
+            <button id="btn-test-yahoo" class="btn btn-secondary" style="flex: 1; min-width: 110px;">
+              <span>Yahoo! 接続テスト</span>
+            </button>
+            <button id="btn-test-jev" class="btn btn-secondary" style="flex: 1; min-width: 110px;">
               <span>Jev 接続テスト</span>
             </button>
           </div>
           <span id="connection-status-msg" class="status-text mt-2"></span>
+          <span id="yahoo-status-msg" class="status-text mt-1"></span>
           <span id="jev-status-msg" class="status-text mt-1"></span>
         </div>
 
