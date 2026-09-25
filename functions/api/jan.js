@@ -49,7 +49,7 @@ export async function onRequest(context) {
   let yahooErrorMsg = null;
   if (appId) {
     try {
-      // 5件取得して、最もシンプルなタイトルを選定
+      // 1. jan_code パラメータで厳密検索
       const yUrl = `https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch?appid=${encodeURIComponent(appId)}&jan_code=${encodeURIComponent(code)}&results=5`;
       const yRes = await fetch(yUrl, {
         headers: {
@@ -57,47 +57,9 @@ export async function onRequest(context) {
         }
       });
 
+      let yData = null;
       if (yRes.ok) {
-        const yData = await yRes.json();
-        if (yData.hits && yData.hits.length > 0) {
-          // 最短・最適タイトルの選定
-          let bestHit = yData.hits[0];
-          let bestCleaned = cleanProductName(bestHit.name || "");
-
-          for (let i = 1; i < yData.hits.length; i++) {
-            const h = yData.hits[i];
-            const c = cleanProductName(h.name || "");
-            if (c && c.length >= 8 && c.length < bestCleaned.length) {
-              bestHit = h;
-              bestCleaned = c;
-            }
-          }
-
-          const rawTitle = bestHit.name || "";
-          const brand = bestHit.brand?.name || bestHit.seller?.name || "";
-          const category = bestHit.genreCategory?.name || "";
-          let imageUrl = bestHit.image?.medium || bestHit.image?.small || null;
-          if (imageUrl && imageUrl.startsWith("http://")) {
-            imageUrl = imageUrl.replace("http://", "https://");
-          }
-
-          return new Response(JSON.stringify({
-            found: true,
-            source: "yahoo",
-            code,
-            title: bestCleaned,
-            rawTitle,
-            brand,
-            category,
-            price: bestHit.price || null,
-            imageUrl
-          }), {
-            status: 200,
-            headers: corsHeaders
-          });
-        } else {
-          yahooErrorMsg = "Yahoo!商品検索で該当する商品が見つかりませんでした (ヒット数0件)";
-        }
+        yData = await yRes.json();
       } else {
         const errText = await yRes.text();
         console.warn(`[Yahoo API Error] status=${yRes.status} body=${errText}`);
@@ -106,6 +68,60 @@ export async function onRequest(context) {
         } else {
           yahooErrorMsg = `Yahoo! APIエラー (HTTP ${yRes.status})`;
         }
+      }
+
+      // 2. jan_codeで0件の場合、query=JANコードでキーワード検索フォールバック
+      if (yData && (!yData.hits || yData.hits.length === 0) && !yahooErrorMsg) {
+        const queryUrl = `https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch?appid=${encodeURIComponent(appId)}&query=${encodeURIComponent(code)}&results=5`;
+        const qRes = await fetch(queryUrl, {
+          headers: { "User-Agent": "itemDB-Cloudflare/1.0" }
+        });
+        if (qRes.ok) {
+          const qData = await qRes.json();
+          if (qData.hits && qData.hits.length > 0) {
+            yData = qData;
+          }
+        }
+      }
+
+      if (yData && yData.hits && yData.hits.length > 0) {
+        // 最短・最適タイトルの選定
+        let bestHit = yData.hits[0];
+        let bestCleaned = cleanProductName(bestHit.name || "");
+
+        for (let i = 1; i < yData.hits.length; i++) {
+          const h = yData.hits[i];
+          const c = cleanProductName(h.name || "");
+          if (c && c.length >= 8 && c.length < bestCleaned.length) {
+            bestHit = h;
+            bestCleaned = c;
+          }
+        }
+
+        const rawTitle = bestHit.name || "";
+        const brand = bestHit.brand?.name || bestHit.seller?.name || "";
+        const category = bestHit.genreCategory?.name || "";
+        let imageUrl = bestHit.image?.medium || bestHit.image?.small || null;
+        if (imageUrl && imageUrl.startsWith("http://")) {
+          imageUrl = imageUrl.replace("http://", "https://");
+        }
+
+        return new Response(JSON.stringify({
+          found: true,
+          source: "yahoo",
+          code,
+          title: bestCleaned,
+          rawTitle,
+          brand,
+          category,
+          price: bestHit.price || null,
+          imageUrl
+        }), {
+          status: 200,
+          headers: corsHeaders
+        });
+      } else if (!yahooErrorMsg) {
+        yahooErrorMsg = "Yahoo!商品検索で該当する商品が見つかりませんでした (ヒット数0件)";
       }
     } catch (yErr) {
       console.warn(`[Yahoo API Exception] ${yErr.message}`);

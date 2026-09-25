@@ -1025,14 +1025,14 @@ class Application {
     }
 
     btn.disabled = true;
-    statusEl.textContent = 'Yahoo! API 接続テスト中 (伊藤園 お〜いお茶: 4901085089309 で検索)...';
+    statusEl.textContent = 'Yahoo! API 接続テスト中 (コクヨ ドットライナー: 4901480151830 で検索)...';
     statusEl.className = 'status-text text-muted';
 
     try {
       const isLocal = (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'));
       const janEndpoint = isLocal ? 'https://itemdb.pages.dev/api/jan' : '/api/jan';
 
-      const res = await fetch(`${janEndpoint}?code=4901085089309&appid=${encodeURIComponent(yahooAppId)}`);
+      const res = await fetch(`${janEndpoint}?code=4901480151830&appid=${encodeURIComponent(yahooAppId)}`);
       if (!res.ok) {
         throw new Error(`HTTP ${res.status} ${res.statusText}`);
       }
