@@ -66,7 +66,7 @@ export async function onRequest(context) {
       const yUrl = `https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch?appid=${encodeURIComponent(appId)}&jan_code=${encodeURIComponent(code)}&results=2`;
       const yRes = await fetch(yUrl, {
         headers: {
-          "User-Agent": `itemDB-Cloudflare/1.0; Yahoo AppID: ${appId}`
+          "User-Agent": "itemDB-Cloudflare/1.0"
         },
         signal: AbortSignal.timeout(2500)
       });
@@ -77,7 +77,14 @@ export async function onRequest(context) {
       } else {
         const errText = await yRes.text();
         console.warn(`[Yahoo API Error] status=${yRes.status} body=${errText}`);
-        if (yRes.status === 401 || yRes.status === 403) {
+        let detail = "";
+        try {
+          const errObj = JSON.parse(errText);
+          detail = errObj?.Error?.Message || errObj?.message || "";
+        } catch (_) {}
+        if (detail) {
+          yahooErrorMsg = `Yahoo! APIエラー (HTTP ${yRes.status}): ${detail}`;
+        } else if (yRes.status === 401 || yRes.status === 403) {
           yahooErrorMsg = `Yahoo! APIエラー (HTTP ${yRes.status}): Client IDが無効か、未承認の可能性があります`;
         } else {
           yahooErrorMsg = `Yahoo! APIエラー (HTTP ${yRes.status})`;
@@ -89,7 +96,7 @@ export async function onRequest(context) {
         const queryUrl = `https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch?appid=${encodeURIComponent(appId)}&query=${encodeURIComponent(code)}&results=2`;
         const qRes = await fetch(queryUrl, {
           headers: {
-            "User-Agent": `itemDB-Cloudflare/1.0; Yahoo AppID: ${appId}`
+            "User-Agent": "itemDB-Cloudflare/1.0"
           },
           signal: AbortSignal.timeout(2000)
         });
