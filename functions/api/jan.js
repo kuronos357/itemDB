@@ -8,37 +8,7 @@
 
 function cleanProductName(name) {
   if (!name || typeof name !== 'string') return '';
-  let clean = name.trim();
-
-  // 1. 墨付き括弧や角括弧で囲まれた販促ワードを削除
-  clean = clean.replace(/【(?:送料無料|送料込|公式|正規品|即納|即日発送|あす楽|新品|ポイント\d+倍|訳あり|アウトレット|特価|セール|ケース販売|まとめ買い|限定|日本製|大容量|業務用|詰替|つめかえ)[^】]*】/gi, '');
-  clean = clean.replace(/\[(?:送料無料|送料込|公式|正規品|即納|即日発送|あす楽|新品|ポイント\d+倍|訳あり|アウトレット|特価|セール)[^\]]*\]/gi, '');
-  
-  // 一般的な括弧先頭のプロモーション
-  clean = clean.replace(/^【[^】]+】\s*/g, '');
-  clean = clean.replace(/^\[[^\]]+\]\s*/g, '');
-
-  // 2. 記号で囲まれた販促語
-  clean = clean.replace(/[★☆◆◇■▲▼◎][^★☆◆◇■▲▼◎]+[★☆◆◇■▲▼◎]/g, '');
-
-  // 3. 単独の販促ワード
-  clean = clean.replace(/\b(?:送料無料|送料込|即日発送|即納|あす楽)\b/gi, '');
-
-  // 4. ガジェット等のSEO長文タイトルの読点「、」スマートカット
-  // 読点「、」で区切られており、全体が38文字以上ある場合、後ろの用途（「〜対応」「〜向け」「ゴルフスイング」等）をカット
-  if (clean.length > 38 && clean.includes('、')) {
-    const parts = clean.split('、');
-    let shortTitle = parts[0];
-    if (shortTitle.length < 24 && parts[1]) {
-      shortTitle += ' ' + parts[1];
-    }
-    clean = shortTitle;
-  }
-
-  // 5. 余分な連続スペースの除去
-  clean = clean.replace(/\s+/g, ' ').trim();
-
-  return clean || name.trim();
+  return name.replace(/\s+/g, ' ').trim();
 }
 
 export async function onRequest(context) {

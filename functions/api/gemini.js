@@ -55,7 +55,7 @@ export async function onRequest(context) {
     });
   }
 
-  const model = url.searchParams.get("model") || "gemini-2.5-flash";
+  const model = url.searchParams.get("model") || "gemini-3.1-flash-lite";
   const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
   try {

@@ -53,36 +53,7 @@ export class BarcodeService {
 
   static cleanProductName(name) {
     if (!name || typeof name !== 'string') return '';
-    let clean = name.trim();
-
-    // 1. 墨付き括弧や角括弧で囲まれた販促ワードを削除
-    clean = clean.replace(/【(?:送料無料|送料込|公式|正規品|即納|即日発送|あす楽|新品|ポイント\d+倍|訳あり|アウトレット|特価|セール|ケース販売|まとめ買い|限定|日本製|大容量|業務用|詰替|つめかえ)[^】]*】/gi, '');
-    clean = clean.replace(/\[(?:送料無料|送料込|公式|正規品|即納|即日発送|あす楽|新品|ポイント\d+倍|訳あり|アウトレット|特価|セール)[^\]]*\]/gi, '');
-
-    // 一般的な括弧先頭のプロモーション
-    clean = clean.replace(/^【[^】]+】\s*/g, '');
-    clean = clean.replace(/^\[[^\]]+\]\s*/g, '');
-
-    // 2. 記号で囲まれた販促語
-    clean = clean.replace(/[★☆◆◇■▲▼◎][^★☆◆◇■▲▼◎]+[★☆◆◇■▲▼◎]/g, '');
-
-    // 3. 単独の販促ワード
-    clean = clean.replace(/\b(?:送料無料|送料込|即日発送|即納|あす楽)\b/gi, '');
-
-    // 4. ガジェット等のSEO長文タイトルの読点「、」スマートカット
-    if (clean.length > 38 && clean.includes('、')) {
-      const parts = clean.split('、');
-      let shortTitle = parts[0];
-      if (shortTitle.length < 24 && parts[1]) {
-        shortTitle += ' ' + parts[1];
-      }
-      clean = shortTitle;
-    }
-
-    // 5. 余分な連続スペースの除去
-    clean = clean.replace(/\s+/g, ' ').trim();
-
-    return clean || name.trim();
+    return name.replace(/\s+/g, ' ').trim();
   }
 
   /**
@@ -113,7 +84,7 @@ export class BarcodeService {
       // 1. Gemini による商品名スマート要約（長文SEOタイトルの場合またはGemini有効時）
       if (options.geminiApiKey && result.title && !result.title.startsWith('市販品 (JAN:')) {
         try {
-          result.title = await GeminiService.cleanProductTitle(result.title, options.geminiApiKey);
+          result.title = await GeminiService.cleanProductTitle(result.title, options.geminiApiKey, options.geminiModel);
         } catch (geminiErr) {
           console.warn('[BarcodeService] Gemini title cleanup error:', geminiErr);
         }
@@ -146,7 +117,8 @@ export class BarcodeService {
             result.title,
             options.geminiApiKey,
             candidateAttrs,
-            maxN
+            maxN,
+            options.geminiModel
           );
         } catch (geminiClassifyErr) {
           console.warn('[BarcodeService] Gemini classification error:', geminiClassifyErr);

@@ -580,6 +580,7 @@ class Application {
         jevApiKey: state.config.jevApiKey,
         jevMaxAttributes: state.config.jevMaxAttributes,
         geminiApiKey: state.config.geminiApiKey,
+        geminiModel: state.config.geminiModel,
         candidateAttributes,
         yahooAppId: state.config.yahooAppId,
         existingRecord
@@ -931,8 +932,9 @@ class Application {
     const jevMaxRaw = document.getElementById('input-jev-max-attributes')?.value;
     const jevMaxAttributes = jevMaxRaw ? Math.max(1, parseInt(jevMaxRaw, 10) || 3) : 3;
     const geminiApiKey = document.getElementById('input-gemini-api-key')?.value.trim();
+    const geminiModel = document.getElementById('input-gemini-model')?.value.trim() || 'gemini-3.1-flash-lite';
 
-    state.saveConfig({ apiKey, dbId, yahooAppId, jevApiKey, jevMaxAttributes, geminiApiKey, proxyMode: 'cloudflare' });
+    state.saveConfig({ apiKey, dbId, yahooAppId, jevApiKey, jevMaxAttributes, geminiApiKey, geminiModel, proxyMode: 'cloudflare' });
     if (apiKey && dbId) {
       notion.resolveDatabases(dbId).catch(() => {});
     }
@@ -1099,7 +1101,7 @@ class Application {
   }
 
   /**
-   * Gemini 2.5 Flash 疎通テスト
+   * Gemini API 疎通テスト
    */
   async _testGeminiConnection() {
     const btn = document.getElementById('btn-test-gemini');
@@ -1107,6 +1109,8 @@ class Application {
     if (!btn || !statusEl) return;
 
     const geminiApiKey = document.getElementById('input-gemini-api-key')?.value.trim();
+    const geminiModel = document.getElementById('input-gemini-model')?.value.trim() || state.config.geminiModel || 'gemini-3.1-flash-lite';
+
     if (!geminiApiKey) {
       statusEl.textContent = 'Gemini APIキーを入力してください。未設定時は通常整形のみ動作します。';
       statusEl.className = 'status-text text-warning';
@@ -1114,13 +1118,14 @@ class Application {
     }
 
     btn.disabled = true;
-    statusEl.textContent = 'Gemini API 接続テスト中 (gemini-2.5-flash)...';
+    statusEl.textContent = `Gemini API 接続テスト中 (${geminiModel})...`;
     statusEl.className = 'status-text text-muted';
 
     try {
-      const res = await GeminiService.testConnection(geminiApiKey);
+      const res = await GeminiService.testConnection(geminiApiKey, geminiModel);
       if (res.ok) {
         state.config.geminiApiKey = geminiApiKey;
+        state.config.geminiModel = geminiModel;
         state.saveConfig(state.config);
         statusEl.innerHTML = `✓ ${res.message}`;
         statusEl.className = 'status-text text-success';
@@ -1207,6 +1212,7 @@ class Application {
     const jevMaxRaw = document.getElementById('input-jev-max-attributes')?.value;
     const jevMaxAttributes = jevMaxRaw ? Math.max(1, parseInt(jevMaxRaw, 10) || 3) : 3;
     const geminiApiKey = document.getElementById('input-gemini-api-key')?.value.trim();
+    const geminiModel = document.getElementById('input-gemini-model')?.value.trim() || state.config.geminiModel || 'gemini-3.1-flash-lite';
 
     if (!apiKey || !dbId) {
       ui.showToast('Notion APIキーとデータベースIDを入力してください', 'warning');
@@ -1220,7 +1226,7 @@ class Application {
     }
 
     try {
-      state.saveConfig({ apiKey, dbId, yahooAppId, jevApiKey, jevMaxAttributes, geminiApiKey, proxyMode: 'cloudflare' });
+      state.saveConfig({ apiKey, dbId, yahooAppId, jevApiKey, jevMaxAttributes, geminiApiKey, geminiModel, proxyMode: 'cloudflare' });
       const count = await notion.saveConfigToNotion({
         apiKey,
         dbId,
@@ -1229,7 +1235,8 @@ class Application {
         yahooAppId,
         jevApiKey,
         jevMaxAttributes,
-        geminiApiKey
+        geminiApiKey,
+        geminiModel
       });
 
       ui._updateSyncBadges();

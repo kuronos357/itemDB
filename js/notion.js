@@ -547,8 +547,7 @@ export class NotionClient {
       const normTitle = title.toLowerCase().replace(/[\s\-_（）\(\)]/g, '');
 
       if (normTitle.includes('notion') || normTitle.includes('トークン') || normTitle.includes('secret')) {
-        updates.apiKey = value;
-        updatedKeys.push('Notion API');
+        // Notion APIトークンはセキュリティおよび設計上、Notionテーブルから同期しない（端末内のみで安全に管理）
       } else if (normTitle.includes('物品') || normTitle.includes('item')) {
         updates.itemDbId = value.replace(/[-\s]/g, '');
         updatedKeys.push('物品DB ID');
@@ -567,6 +566,9 @@ export class NotionClient {
       } else if (normTitle.includes('jev')) {
         updates.jevApiKey = value;
         updatedKeys.push('Jev APIキー');
+      } else if (normTitle.includes('geminiモデル') || normTitle.includes('geminimodel') || normTitle.includes('モデル名')) {
+        updates.geminiModel = value;
+        updatedKeys.push(`Geminiモデル (${value})`);
       } else if (normTitle.includes('gemini') || normTitle.includes('ジェミニ')) {
         updates.geminiApiKey = value;
         updatedKeys.push('Gemini APIキー');
@@ -627,14 +629,15 @@ export class NotionClient {
 
     const existingPages = res?.results || [];
 
+    // Notion APIトークンはNotionテーブルに書き込まない（セキュリティおよび自己完結防止のため端末保持のみ）
     const itemMap = [
-      { key: 'apiKey', title: 'NotionAPI', val: configData.apiKey },
       { key: 'itemDbId', title: '物品DBID', val: configData.itemDbId },
       { key: 'locationDbId', title: '場所DBID', val: configData.locationDbId },
       { key: 'yahooAppId', title: 'Yahoo商品検索（v3）API', val: configData.yahooAppId },
       { key: 'jevApiKey', title: 'JevAPI', val: configData.jevApiKey },
       { key: 'jevMaxAttributes', title: 'Jev最大件数', val: configData.jevMaxAttributes != null ? String(configData.jevMaxAttributes) : '3' },
-      { key: 'geminiApiKey', title: 'GeminiAPI', val: configData.geminiApiKey }
+      { key: 'geminiApiKey', title: 'GeminiAPI', val: configData.geminiApiKey },
+      { key: 'geminiModel', title: 'Geminiモデル名', val: configData.geminiModel || 'gemini-3.1-flash-lite' }
     ];
 
     let savedCount = 0;

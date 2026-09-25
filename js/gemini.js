@@ -1,21 +1,24 @@
 /**
- * itemDB - Google Gemini API Client (Gemini 2.5 Flash)
+ * itemDB - Google Gemini API Client (Gemini 3.1 Flash-Lite)
  * 
  * 長大なEC出品タイトルから余計な宣伝文句や用途を省いて
  * 純粋な「メーカー・ブランド名＋正式製品名＋型番」を美しく抽出するスマート要約と、
  * Notion属性の自動分類を高速に行います。
  */
 
+import { state } from './state.js';
+
 export class GeminiService {
   /**
    * 実行環境に応じたプロキシ/直通エンドポイントURLを決定
    */
-  static _getEndpointUrl(model = 'gemini-2.5-flash') {
-    if (typeof window === 'undefined') return '/api/gemini';
+  static _getEndpointUrl(model = null) {
+    const targetModel = model || state.config?.geminiModel || 'gemini-3.1-flash-lite';
+    if (typeof window === 'undefined') return `/api/gemini?model=${encodeURIComponent(targetModel)}`;
     const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
     return isLocal
-      ? `https://itemdb.pages.dev/api/gemini?model=${encodeURIComponent(model)}`
-      : `/api/gemini?model=${encodeURIComponent(model)}`;
+      ? `https://itemdb.pages.dev/api/gemini?model=${encodeURIComponent(targetModel)}`
+      : `/api/gemini?model=${encodeURIComponent(targetModel)}`;
   }
 
   /**
@@ -26,7 +29,7 @@ export class GeminiService {
       throw new Error('Gemini APIキーが指定されていません。');
     }
 
-    const model = options.model || 'gemini-2.5-flash';
+    const model = options.model || state.config?.geminiModel || 'gemini-3.1-flash-lite';
     const cleanKey = apiKey.trim();
     const endpoint = this._getEndpointUrl(model);
 
@@ -85,9 +88,10 @@ export class GeminiService {
    * 
    * @param {string} rawTitle ECモールの長文タイトル
    * @param {string} apiKey Gemini APIキー
+   * @param {string} [model] 使用モデル名
    * @returns {Promise<string>} 整形後の商品名
    */
-  static async cleanProductTitle(rawTitle, apiKey) {
+  static async cleanProductTitle(rawTitle, apiKey, model = null) {
     if (!rawTitle || !apiKey) return rawTitle || '';
 
     const prompt = `あなたは商品管理データベースのデータクレンジング専門AIです。
@@ -104,6 +108,7 @@ ${rawTitle}`;
 
     try {
       const cleaned = await this._generate(prompt, apiKey, {
+        model,
         temperature: 0.1,
         maxOutputTokens: 100
       });
@@ -123,9 +128,10 @@ ${rawTitle}`;
    * @param {string} apiKey Gemini APIキー
    * @param {string[]} candidateAttributes Notionの属性候補リスト
    * @param {number} [maxN=3] 最大採用件数
+   * @param {string} [model] 使用モデル名
    * @returns {Promise<string[]>}
    */
-  static async classifyAttributes(title, apiKey, candidateAttributes = [], maxN = 3) {
+  static async classifyAttributes(title, apiKey, candidateAttributes = [], maxN = 3, model = null) {
     if (!title || !apiKey || !Array.isArray(candidateAttributes) || candidateAttributes.length === 0) {
       return [];
     }
@@ -144,6 +150,7 @@ ${JSON.stringify(candidateAttributes)}
 
     try {
       const text = await this._generate(prompt, apiKey, {
+        model,
         temperature: 0.1,
         maxOutputTokens: 100
       });
@@ -164,23 +171,25 @@ ${JSON.stringify(candidateAttributes)}
   /**
    * Gemini API 疎通テスト
    * @param {string} apiKey Gemini APIキー
+   * @param {string} [model] 使用モデル名
    * @returns {Promise<{ ok: boolean, duration?: number, message: string }>}
    */
-  static async testConnection(apiKey) {
+  static async testConnection(apiKey, model = null) {
     if (!apiKey || !apiKey.trim()) {
       return { ok: false, message: 'Gemini APIキーが入力されていません。' };
     }
 
+    const targetModel = model || state.config?.geminiModel || 'gemini-3.1-flash-lite';
     const startTime = performance.now();
     try {
       const testTitle = '【送料無料】コクヨ ドットライナー つめ替え用テープ 8.4mm×16m タ-D400-08N 10個セット [新品]';
-      const cleaned = await this.cleanProductTitle(testTitle, apiKey);
+      const cleaned = await this.cleanProductTitle(testTitle, apiKey, targetModel);
       const duration = Math.round(performance.now() - startTime);
 
       return {
         ok: true,
         duration,
-        message: `接続成功 (${duration}ms): 「${cleaned}」にスマート整形されました。`
+        message: `接続成功 (${duration}ms, モデル: ${targetModel}): 「${cleaned}」にスマート整形されました。`
       };
     } catch (err) {
       return {

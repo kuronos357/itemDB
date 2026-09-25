@@ -574,6 +574,10 @@ class UIManager {
     if (geminiInput) {
       geminiInput.value = state.config.geminiApiKey || '';
     }
+    const geminiModelInput = document.getElementById('input-gemini-model');
+    if (geminiModelInput) {
+      geminiModelInput.value = state.config.geminiModel || 'gemini-3.1-flash-lite';
+    }
 
     const detectedEl = document.getElementById('detected-db-id');
     if (detectedEl) {
@@ -617,10 +621,11 @@ class UIManager {
     const container = document.getElementById('sync-badges-container');
     if (!container) return;
 
-    const { yahooAppId, geminiApiKey, jevApiKey, itemDbId, locationDbId, configDbId } = state.config;
+    const { yahooAppId, geminiApiKey, geminiModel, jevApiKey, itemDbId, locationDbId, configDbId } = state.config;
+    const modelShort = (geminiModel || '3.1 Flash-Lite').replace(/^gemini-/, '');
     const items = [
       { label: 'Yahoo!商品検索', active: Boolean(yahooAppId) },
-      { label: 'Gemini 2.5', active: Boolean(geminiApiKey) },
+      { label: `Gemini (${modelShort})`, active: Boolean(geminiApiKey) },
       { label: 'Jev属性分類', active: Boolean(jevApiKey) },
       { label: '物品/場所DB', active: Boolean(itemDbId && locationDbId) },
       { label: '設定テーブル', active: Boolean(configDbId) }
