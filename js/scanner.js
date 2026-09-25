@@ -144,9 +144,9 @@ class ScannerService extends EventTarget {
       const config = {
         fps: 15,
         qrbox: (viewfinderWidth, viewfinderHeight) => {
-          const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-          const edge = Math.floor(minEdge * 0.75);
-          return { width: edge, height: edge };
+          const width = Math.floor(viewfinderWidth * 0.82);
+          const height = Math.floor(Math.min(viewfinderHeight * 0.65, Math.max(width * 0.6, 180)));
+          return { width, height };
         },
         aspectRatio: 1.0,
         experimentalFeatures: {

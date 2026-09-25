@@ -226,5 +226,5 @@ class StateStore extends EventTarget {
   }
 }
 
-export const APP_VERSION = 'v43';
+export const APP_VERSION = 'v44';
 export const state = new StateStore();

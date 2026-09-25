@@ -1002,7 +1002,9 @@ class UIManager {
 
     const attrHintEl = document.getElementById('barcode-attr-hint');
     if (attrHintEl) {
-      if (!initialTitle) {
+      if (itemData.isSecondBarcode) {
+        attrHintEl.innerHTML = `<span style="color: #f59e0b; font-weight: bold;">⚠️ 書籍の2段目バーコード（分類・価格コード）です。1段目のISBNバーコード（978から始まるコード）をスキャンしてください。</span>`;
+      } else if (!initialTitle) {
         const reason = itemData.message ? ` (${itemData.message})` : '';
         attrHintEl.innerHTML = `<span style="color: var(--color-warning);">⚠️ 商品情報が見つかりませんでした${reason}。品名を手入力できます。</span>`;
       } else {

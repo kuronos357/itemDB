@@ -202,7 +202,87 @@ export async function onRequest(context) {
     // タイムアウトまたは失敗時は次へ
   }
 
-  // 4. Google Books API フォールバック (タイムアウト1.2秒)
+  // 4. 書籍コード (ISBN: 978/979) の場合の専門APIフォールバック (openBD & NDL)
+  if (code.startsWith("978") || code.startsWith("979")) {
+    // 4-1. openBD API (国内書籍・書影あり)
+    try {
+      const obdRes = await fetch(`https://api.openbd.jp/v1/get?isbn=${encodeURIComponent(code)}`, {
+        signal: AbortSignal.timeout(1500)
+      });
+      if (obdRes.ok) {
+        const obdData = await obdRes.json();
+        if (Array.isArray(obdData) && obdData[0]?.summary) {
+          const s = obdData[0].summary;
+          const title = s.title || "";
+          const author = s.author || "";
+          const publisher = s.publisher || "";
+          let imageUrl = s.cover || null;
+          if (imageUrl && imageUrl.startsWith("http://")) {
+            imageUrl = imageUrl.replace("http://", "https://");
+          }
+
+          if (title) {
+            const obdPayload = {
+              found: true,
+              source: "openbd",
+              code,
+              title,
+              brand: publisher,
+              author,
+              category: "書籍",
+              imageUrl
+            };
+            JAN_CACHE.set(code, { timestamp: Date.now(), data: obdPayload });
+            return new Response(JSON.stringify(obdPayload), {
+              status: 200,
+              headers: corsHeaders
+            });
+          }
+        }
+      }
+    } catch (_) {}
+
+    // 4-2. 国立国会図書館サーチ (NDL Search API: 国内出版物網羅)
+    try {
+      const ndlUrl = `https://ndlsearch.ndl.go.jp/api/opensearch?isbn=${encodeURIComponent(code)}`;
+      const ndlRes = await fetch(ndlUrl, { signal: AbortSignal.timeout(2000) });
+      if (ndlRes.ok) {
+        const xml = await ndlRes.text();
+        const itemMatch = xml.match(/<item>([\s\S]*?)<\/item>/);
+        if (itemMatch) {
+          const item = itemMatch[1];
+          const titleMatch = item.match(/<title>([\s\S]*?)<\/title>/);
+          const rawTitle = titleMatch ? titleMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim() : '';
+
+          const creatorMatch = item.match(/<dc:creator>([\s\S]*?)<\/dc:creator>/) || item.match(/<author>([\s\S]*?)<\/author>/);
+          const author = creatorMatch ? creatorMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim() : '';
+
+          const pubMatch = item.match(/<dc:publisher>([\s\S]*?)<\/dc:publisher>/);
+          const publisher = pubMatch ? pubMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim() : '';
+
+          if (rawTitle) {
+            const ndlPayload = {
+              found: true,
+              source: "ndl",
+              code,
+              title: rawTitle,
+              brand: publisher,
+              author,
+              category: "書籍",
+              imageUrl: null
+            };
+            JAN_CACHE.set(code, { timestamp: Date.now(), data: ndlPayload });
+            return new Response(JSON.stringify(ndlPayload), {
+              status: 200,
+              headers: corsHeaders
+            });
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 5. Google Books API フォールバック (洋書対応・タイムアウト1.2秒)
   try {
     const gUrl = `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(code)}`;
     const gRes = await fetch(gUrl, {

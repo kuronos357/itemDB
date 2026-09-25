@@ -71,11 +71,23 @@ export class BarcodeService {
       return JSON.parse(JSON.stringify(cached));
     }
 
+    // 2段目バーコード (分類・価格コード: 192...) の検知
+    if (code.length === 13 && code.startsWith('192')) {
+      return {
+        code,
+        isIsbn: true,
+        title: '',
+        details: `書籍の2段目バーコード（価格・分類コード: ${code}）です。\n1段目のISBNバーコード（978から始まるコード）をスキャンしてください。`,
+        attributes: ['本'],
+        isSecondBarcode: true
+      };
+    }
+
     const isBook = this.isIsbn(code);
 
     let result = null;
     if (isBook) {
-      result = await this._lookupIsbn(code);
+      result = await this._lookupIsbn(code, options);
     } else {
       result = await this._lookupJan(code, options);
       const candidateAttrs = Array.isArray(options.candidateAttributes) ? options.candidateAttributes : [];
@@ -143,22 +155,24 @@ export class BarcodeService {
       if (!result.attributes || result.attributes.length === 0) {
         result.attributes = candidateAttrs.includes('市販品') ? ['市販品'] : [];
       }
-
-      if (result && result.title) {
-        CLIENT_JAN_CACHE.set(code, JSON.parse(JSON.stringify(result)));
-      }
-
-      return result;
     }
+
+    if (result && result.title) {
+      CLIENT_JAN_CACHE.set(code, JSON.parse(JSON.stringify(result)));
+    }
+
+    return result;
   }
 
   /**
-   * openBD API および Google Books API による書籍情報の検索
+   * openBD API、国立国会図書館 (NDL) API、Yahoo!ショッピングAPI、Google Books API による多層書籍情報検索
    */
-  static async _lookupIsbn(isbn) {
-    // 1. openBD API (国内書籍の最高精度)
+  static async _lookupIsbn(isbn, options = {}) {
+    // 1. openBD API (国内書籍の最高精度・書影画像あり)
     try {
-      const res = await fetch(`https://api.openbd.jp/v1/get?isbn=${encodeURIComponent(isbn)}`);
+      const res = await fetch(`https://api.openbd.jp/v1/get?isbn=${encodeURIComponent(isbn)}`, {
+        signal: AbortSignal.timeout(2000)
+      });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data) && data[0] && data[0].summary) {
@@ -169,30 +183,92 @@ export class BarcodeService {
           const pubdate = s.pubdate || '';
           const coverUrl = s.cover || null;
 
-          const detailLines = [`ISBN: ${isbn}`];
-          if (author) detailLines.push(`著者: ${author}`);
-          if (publisher) detailLines.push(`出版社: ${publisher}`);
-          if (pubdate) detailLines.push(`刊行年月: ${pubdate}`);
+          if (title) {
+            const detailLines = [`ISBN: ${isbn}`];
+            if (author) detailLines.push(`著者: ${author}`);
+            if (publisher) detailLines.push(`出版社: ${publisher}`);
+            if (pubdate) detailLines.push(`刊行年月: ${pubdate}`);
 
-          return {
-            code: isbn,
-            isIsbn: true,
-            title: title || `書籍 (ISBN: ${isbn})`,
-            author,
-            publisher,
-            coverUrl,
-            details: detailLines.join('\n'),
-            attributes: ['本']
-          };
+            return {
+              code: isbn,
+              isIsbn: true,
+              title,
+              author,
+              publisher,
+              coverUrl,
+              details: detailLines.join('\n'),
+              attributes: ['本']
+            };
+          }
         }
       }
     } catch (e) {
       console.warn('[BarcodeService] openBD lookup error:', e);
     }
 
-    // 2. Google Books API フォールバック (openBDに無い書籍・専門書・洋書に対応)
+    // 2. 国立国会図書館サーチ (NDL Search API) - openBD未登録のあらゆる国内出版物を網羅 (キー不要・無料・CORS対応)
     try {
-      const gRes = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn)}`);
+      const ndlUrl = `https://ndlsearch.ndl.go.jp/api/opensearch?isbn=${encodeURIComponent(isbn)}`;
+      const ndlRes = await fetch(ndlUrl, { signal: AbortSignal.timeout(2500) });
+      if (ndlRes.ok) {
+        const xml = await ndlRes.text();
+        const itemMatch = xml.match(/<item>([\s\S]*?)<\/item>/);
+        if (itemMatch) {
+          const item = itemMatch[1];
+          const titleMatch = item.match(/<title>([\s\S]*?)<\/title>/);
+          const rawTitle = titleMatch ? titleMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim() : '';
+
+          const creatorMatch = item.match(/<dc:creator>([\s\S]*?)<\/dc:creator>/) || item.match(/<author>([\s\S]*?)<\/author>/);
+          const author = creatorMatch ? creatorMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim() : '';
+
+          const pubMatch = item.match(/<dc:publisher>([\s\S]*?)<\/dc:publisher>/);
+          const publisher = pubMatch ? pubMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim() : '';
+
+          const dateMatch = item.match(/<dcterms:issued>([\s\S]*?)<\/dcterms:issued>/) || item.match(/<dc:date[^>]*>([\s\S]*?)<\/dc:date>/);
+          const pubdate = dateMatch ? dateMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim() : '';
+
+          if (rawTitle) {
+            const detailLines = [`ISBN: ${isbn}`];
+            if (author) detailLines.push(`著者: ${author}`);
+            if (publisher) detailLines.push(`出版社: ${publisher}`);
+            if (pubdate) detailLines.push(`刊行年月: ${pubdate}`);
+
+            return {
+              code: isbn,
+              isIsbn: true,
+              title: rawTitle,
+              author,
+              publisher,
+              coverUrl: null,
+              details: detailLines.join('\n'),
+              attributes: ['本']
+            };
+          }
+        }
+      }
+    } catch (ndlErr) {
+      console.warn('[BarcodeService] NDL lookup error:', ndlErr);
+    }
+
+    // 3. Yahoo! ショッピング API フォールバック (書籍もJANとして登録されており書影・実売価格を取得可能)
+    try {
+      const janResult = await this._lookupJan(isbn, options);
+      if (janResult && janResult.title && !janResult.title.startsWith('市販品 (JAN:')) {
+        janResult.isIsbn = true;
+        if (!janResult.attributes || janResult.attributes.length === 0 || janResult.attributes.includes('市販品')) {
+          janResult.attributes = ['本'];
+        }
+        return janResult;
+      }
+    } catch (yErr) {
+      console.warn('[BarcodeService] Yahoo fallback for ISBN error:', yErr);
+    }
+
+    // 4. Google Books API フォールバック (洋書・専門書対応)
+    try {
+      const gRes = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn)}`, {
+        signal: AbortSignal.timeout(1500)
+      });
       if (gRes.ok) {
         const gData = await gRes.json();
         if (gData.items && gData.items.length > 0) {
@@ -206,28 +282,45 @@ export class BarcodeService {
             coverUrl = coverUrl.replace('http://', 'https://');
           }
 
-          const detailLines = [`ISBN: ${isbn}`];
-          if (author) detailLines.push(`著者: ${author}`);
-          if (publisher) detailLines.push(`出版社: ${publisher}`);
-          if (pubdate) detailLines.push(`刊行年月: ${pubdate}`);
+          if (title) {
+            const detailLines = [`ISBN: ${isbn}`];
+            if (author) detailLines.push(`著者: ${author}`);
+            if (publisher) detailLines.push(`出版社: ${publisher}`);
+            if (pubdate) detailLines.push(`刊行年月: ${pubdate}`);
 
-          return {
-            code: isbn,
-            isIsbn: true,
-            title: title || `書籍 (ISBN: ${isbn})`,
-            author,
-            publisher,
-            coverUrl,
-            details: detailLines.join('\n'),
-            attributes: ['本']
-          };
+            return {
+              code: isbn,
+              isIsbn: true,
+              title,
+              author,
+              publisher,
+              coverUrl,
+              details: detailLines.join('\n'),
+              attributes: ['本']
+            };
+          }
         }
       }
     } catch (e) {
       console.warn('[BarcodeService] Google Books lookup error:', e);
     }
 
-    // 3. 両方で見つからなかった場合のフォールバック（手入力を促す）
+    // 5. 過去にNotionへ登録した同一ISBNの既存情報があれば補完
+    if (options.existingRecord) {
+      const ex = options.existingRecord;
+      return {
+        code: isbn,
+        isIsbn: true,
+        title: ex.name || '',
+        author: ex.author || '',
+        publisher: ex.publisher || '',
+        coverUrl: ex.coverUrl || null,
+        details: ex.details || `ISBN: ${isbn}`,
+        attributes: (ex.attributes && ex.attributes.length > 0) ? ex.attributes : ['本']
+      };
+    }
+
+    // 6. 全てで見つからなかった場合のフォールバック（手入力を促す）
     return {
       code: isbn,
       isIsbn: true,
