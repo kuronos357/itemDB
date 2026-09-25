@@ -57,6 +57,16 @@ export class NotionClient {
   }
 
   /**
+   * 32桁の16進数文字列を標準のUUID形式 (8-4-4-4-12) に変換
+   */
+  static formatUuid(input) {
+    if (!input) return '';
+    const clean = String(input).replace(/-/g, '').trim();
+    if (clean.length !== 32) return input;
+    return `${clean.slice(0, 8)}-${clean.slice(8, 12)}-${clean.slice(12, 16)}-${clean.slice(16, 20)}-${clean.slice(20)}`;
+  }
+
+  /**
    * 現在の設定に基づきプロキシまたは直通URLを構築
    */
   _buildUrl(endpoint) {
@@ -1197,7 +1207,7 @@ export class NotionClient {
   }
 
   /**
-   * 新しい物品または場所レコードを作成 (data_source_id / database_id 両対応)
+   * 新しい物品または場所レコードを作成 (Notion 2025-09-03 data_source_id / database_id 対応)
    */
   async createRecord({
     numericId = null,
@@ -1210,281 +1220,164 @@ export class NotionClient {
     coverUrl = null,
     code = null
   }) {
-    let targetDbId = isItem
+    // 1. 作成先データソース / データベースIDの特定
+    let targetId = isItem
       ? (state.config.itemDbId || state.config.dbId)
       : (state.config.locationDbId || state.config.dbId);
 
-    // IDの検証・自己修復: もし targetDbId が32桁16進数でなければ、親DB (dbId) から再解決
-    const cleanCheck = String(targetDbId || '').replace(/-/g, '');
-    if (!/^[0-9a-f]{32}$/i.test(cleanCheck) && state.config.dbId) {
-      console.warn('[NotionClient] Invalid targetDbId detected, repairing via resolveDatabases...');
-      try {
-        const resolved = await this.resolveDatabases(state.config.dbId);
-        targetDbId = isItem ? resolved.itemDb.id : resolved.locationDb.id;
-      } catch {
-        targetDbId = NotionClient.extractDatabaseId(state.config.dbId) || targetDbId;
-      }
+    if (!targetId && state.config.dbId) {
+      targetId = state.config.dbId;
     }
+    if (!targetId) throw new Error('作成先データベースが未設定です。');
 
-    if (!targetDbId) throw new Error('作成先データベースが未設定です。');
-
-    const idNum = numericId != null ? Number(numericId) : null;
-    const idStr = numericId != null ? String(numericId) : '';
-
+    // 2. スキーマ取得
     let schema = null;
     try {
-      schema = await this.getDatabaseSchema(targetDbId);
-    } catch {}
+      schema = await this.getDatabaseSchema(targetId);
+    } catch (e) {
+      console.warn('[NotionClient] Schema fetch skipped:', e.message);
+    }
     const props = schema?.properties || {};
 
-    // 1. Titleプロパティ特定
-    let titlePropName = state.config.propMapping.title || '名前';
-    const foundTitleProp = Object.values(props).find(p => p.type === 'title');
-    if (foundTitleProp) {
-      titlePropName = foundTitleProp.name;
-    }
+    // 3. プロパティの構築 (確実に存在するプロパティのみ、型を厳格に適合)
+    const properties = {};
 
-    // 2. IDプロパティ特定
-    let idPropName = state.config.propMapping.id || 'ID';
-    let idPropType = 'number';
-    if (props[idPropName]) {
-      idPropType = props[idPropName].type;
-    } else {
-      const foundId = Object.values(props).find(p => ['id', '物品id', '場所id', '管理番号', 'no'].includes(p.name.toLowerCase()) || p.type === 'number');
-      if (foundId) {
-        idPropName = foundId.name;
-        idPropType = foundId.type;
-      }
-    }
-
-    const defaultTitle = name || (numericId != null ? `${isItem ? '物品' : '場所'} ${numericId}` : '新規アイテム');
-    const properties = {
-      [titlePropName]: {
-        title: [
-          { text: { content: defaultTitle } }
-        ]
-      }
+    // タイトル (必須)
+    const titlePropName = Object.values(props).find(p => p.type === 'title')?.name
+      || state.config.propMapping?.title
+      || '名前';
+    properties[titlePropName] = {
+      title: [{ text: { content: String(name || '新規アイテム') } }]
     };
 
-    // IDの設定 (numericId が指定されている場合のみ設定。null時はNotion側自動採番に任せる)
-    if (numericId !== null && numericId !== undefined && numericId !== '') {
-      if (idPropType === 'number') {
-        properties[idPropName] = { number: idNum };
-      } else if (idPropType === 'rich_text') {
-        properties[idPropName] = { rich_text: [{ text: { content: idStr } }] };
-      }
-    }
-
-    // 3. 種別 (Type) プロパティが存在する場合のみ設定
-    let typePropName = state.config.propMapping.type || '種別';
-    const foundTypeProp = props[typePropName] || Object.values(props).find(p => ['種別', 'タイプ', 'type'].includes(p.name.toLowerCase()));
-    if (foundTypeProp) {
-      if (foundTypeProp.type === 'select') {
-        properties[foundTypeProp.name] = { select: { name: isItem ? '物品' : '場所' } };
-      } else if (foundTypeProp.type === 'status') {
-        properties[foundTypeProp.name] = { status: { name: isItem ? '物品' : '場所' } };
-      }
-    }
-
-    // 4. 現在地/物理アドレス プロパティが存在する場合のみ設定（物品のみ）
-    if (isItem && locationPageId) {
-      let locPropName = state.config.propMapping.location || '物理アドレス';
-      const foundLoc = props[locPropName]
-        || props['物理アドレス']
-        || Object.values(props).find(p => p.type === 'relation' && (
-             p.relation?.data_source_id?.replace(/-/g, '') === state.config.locationDbId ||
-             p.relation?.database_id?.replace(/-/g, '') === state.config.locationDbId ||
-             ['物理アドレス', '現在地', '場所', '保管場所', '収納先'].includes(p.name)
-           ))
-        || Object.values(props).find(p => p.type === 'relation');
-
-      if (foundLoc && foundLoc.type === 'relation') {
-        properties[foundLoc.name] = {
-          relation: [{ id: locationPageId }]
-        };
-      }
-    }
-
-    // 5. 詳細 (Rich Text) プロパティ
+    // 詳細 (rich_text)
     if (details) {
       const detailsProp = props['詳細']
-        || Object.values(props).find(p => p.name === '詳細' && p.type === 'rich_text')
-        || (props[state.config.propMapping.notes]?.type === 'rich_text' ? props[state.config.propMapping.notes] : null);
-      if (detailsProp) {
+        || Object.values(props).find(p => p.type === 'rich_text' && p.name === '詳細')
+        || Object.values(props).find(p => p.type === 'rich_text' && !['ID', 'URL'].includes(p.name));
+      if (detailsProp && detailsProp.type === 'rich_text') {
         properties[detailsProp.name] = {
-          rich_text: [{ text: { content: details } }]
+          rich_text: [{ text: { content: String(details) } }]
         };
       }
     }
 
-    // 6. 属性 (Multi-select / Select) プロパティ
-    if (attributes && attributes.length > 0) {
-      const attrProp = props['属性']
-        || Object.values(props).find(p => p.name === '属性' && (p.type === 'multi_select' || p.type === 'select'))
-        || Object.values(props).find(p => p.type === 'multi_select');
-      if (attrProp) {
-        if (attrProp.type === 'select') {
-          const first = attributes.map(tag => String(tag).trim()).filter(Boolean)[0];
-          if (first) {
-            properties[attrProp.name] = { select: { name: first } };
-          }
-        } else {
-          properties[attrProp.name] = {
-            multi_select: attributes.map(tag => ({ name: String(tag).trim() })).filter(t => t.name)
-          };
-        }
+    // 属性 (multi_select)
+    if (Array.isArray(attributes) && attributes.length > 0) {
+      const attrProp = props['属性'] || Object.values(props).find(p => p.type === 'multi_select');
+      if (attrProp && attrProp.type === 'multi_select') {
+        properties[attrProp.name] = {
+          multi_select: attributes
+            .map(tag => ({ name: String(tag).trim() }))
+            .filter(t => t.name.length > 0)
+        };
       }
     }
 
-    // 7. 自動登録未確認 (Checkbox) プロパティ
-    if (isAutoRegistered) {
-      const autoProp = props['自動登録未確認']
-        || Object.values(props).find(p => p.name.includes('自動登録') && p.type === 'checkbox');
-      if (autoProp) {
-        properties[autoProp.name] = { checkbox: true };
+    // 物理アドレス / 場所 (relation) - 物品登録時
+    if (isItem && locationPageId) {
+      const locProp = props['物理アドレス']
+        || props['現在地']
+        || Object.values(props).find(p => p.type === 'relation' && !['目録', 'サブアイテム', '親アイテム'].includes(p.name));
+      if (locProp && locProp.type === 'relation') {
+        const locUuid = NotionClient.formatUuid(locationPageId);
+        properties[locProp.name] = {
+          relation: [{ id: locUuid }]
+        };
       }
     }
 
-    // 8. アクティブ (checkbox) が存在する場合は true に設定（物品のみ）
+    // 自動登録未確認 (checkbox)
+    if (isAutoRegistered && props['自動登録未確認']?.type === 'checkbox') {
+      properties['自動登録未確認'] = { checkbox: true };
+    }
+
+    // アクティブ (checkbox)
     if (isItem && props['アクティブ']?.type === 'checkbox') {
       properties['アクティブ'] = { checkbox: true };
     }
 
-    // 9. JANコード / バーコード プロパティが存在する場合は自動設定
+    // JANコード / バーコード (rich_text / number)
     if (code) {
-      const barcodeStr = String(code).trim();
-      const foundBarcodeProp = props['JANコード']
+      const barcodeProp = props['JANコード']
         || props['JAN']
         || props['バーコード']
-        || props['barcode']
-        || props['Barcode']
-        || props['ISBN']
-        || Object.values(props).find(p => ['janコード', 'jan', 'バーコード', 'barcode', 'isbn'].includes(p.name.toLowerCase()));
-      if (foundBarcodeProp && foundBarcodeProp.type !== 'title') {
-        if (foundBarcodeProp.type === 'rich_text') {
-          properties[foundBarcodeProp.name] = { rich_text: [{ text: { content: barcodeStr } }] };
-        } else if (foundBarcodeProp.type === 'number') {
-          const num = Number(barcodeStr.replace(/\D/g, ''));
-          if (!isNaN(num)) {
-            properties[foundBarcodeProp.name] = { number: num };
-          }
-        } else if (foundBarcodeProp.type === 'phone_number') {
-          properties[foundBarcodeProp.name] = { phone_number: barcodeStr };
+        || Object.values(props).find(p => ['janコード', 'jan', 'バーコード', 'barcode'].includes(p.name.toLowerCase()));
+      if (barcodeProp && barcodeProp.type !== 'title') {
+        const strCode = String(code).trim();
+        if (barcodeProp.type === 'rich_text') {
+          properties[barcodeProp.name] = { rich_text: [{ text: { content: strCode } }] };
+        } else if (barcodeProp.type === 'number') {
+          const num = Number(strCode.replace(/\D/g, ''));
+          if (!isNaN(num)) properties[barcodeProp.name] = { number: num };
         }
       }
     }
 
-    // カバー画像 URL の検証（http/httpsで始まる有効なURL文字列のみセット）
-    const validCoverUrl = (typeof coverUrl === 'string' && /^https?:\/\/.+/i.test(coverUrl.trim()))
-      ? coverUrl.trim()
-      : null;
+    // 4. parent の構築 (Notion 2025-09-03 data_source_id / database_id)
+    const targetUuid = NotionClient.formatUuid(targetId);
 
-    // リクエストボディ構築
-    const requestBody = {
-      parent: { database_id: targetDbId },
-      properties
-    };
-
-    if (validCoverUrl) {
-      requestBody.cover = {
-        type: 'external',
-        external: { url: validCoverUrl }
-      };
-    }
-
-    // Notion API 呼び出し（多層フォールバック機構）
     let res = null;
-    try {
-      res = await this._request(`pages`, {
-        method: 'POST',
-        body: JSON.stringify(requestBody)
-      });
-    } catch (err) {
-      console.warn('[NotionClient] createRecord initial attempt failed:', err.message);
+    let lastError = null;
 
-      // フォールバック1: data_source_id への切り替え試行
+    // 優先順位1: data_source_id (Notion 2025-09-03 マルチデータソースDB標準)
+    try {
+      res = await this._request('pages', {
+        method: 'POST',
+        body: JSON.stringify({
+          parent: { type: 'data_source_id', data_source_id: targetUuid },
+          properties
+        })
+      });
+    } catch (err1) {
+      lastError = err1;
+      console.warn('[NotionClient] data_source_id failed, trying database_id:', err1.message);
+
+      // 優先順位2: database_id (従来の単一DB)
       try {
-        requestBody.parent = { data_source_id: targetDbId };
-        res = await this._request(`pages`, {
+        res = await this._request('pages', {
           method: 'POST',
-          body: JSON.stringify(requestBody)
+          body: JSON.stringify({
+            parent: { type: 'database_id', database_id: targetUuid },
+            properties
+          })
         });
       } catch (err2) {
-        // フォールバック2: cover に起因するエラーの可能性を排除（cover 除去して database_id または data_source_id で試行）
-        if (requestBody.cover) {
-          delete requestBody.cover;
+        lastError = err2;
+        console.warn('[NotionClient] database_id failed, trying minimal title only:', err2.message);
+
+        // 優先順位3: タイトルのみの最小構成 (プロパティ不一致の完全排除)
+        const minimalProps = {
+          [titlePropName]: properties[titlePropName]
+        };
+        try {
+          res = await this._request('pages', {
+            method: 'POST',
+            body: JSON.stringify({
+              parent: { type: 'data_source_id', data_source_id: targetUuid },
+              properties: minimalProps
+            })
+          });
+        } catch (err3) {
           try {
-            requestBody.parent = { database_id: targetDbId };
-            res = await this._request(`pages`, {
+            res = await this._request('pages', {
               method: 'POST',
-              body: JSON.stringify(requestBody)
+              body: JSON.stringify({
+                parent: { type: 'database_id', database_id: targetUuid },
+                properties: minimalProps
+              })
             });
-          } catch (err3) {
-            try {
-              requestBody.parent = { data_source_id: targetDbId };
-              res = await this._request(`pages`, {
-                method: 'POST',
-                body: JSON.stringify(requestBody)
-              });
-            } catch (err4) {
-              // フォールバック3: カスタムプロパティ（属性・詳細等）の型不一致を排除し、タイトルとIDのみで作成
-              console.warn('[NotionClient] Retrying with minimal properties (title and ID only)...');
-              const minimalProperties = {
-                [titlePropName]: properties[titlePropName]
-              };
-              if (properties[idPropName]) {
-                minimalProperties[idPropName] = properties[idPropName];
-              }
-              const minimalBody = {
-                parent: { database_id: targetDbId },
-                properties: minimalProperties
-              };
-              try {
-                res = await this._request(`pages`, {
-                  method: 'POST',
-                  body: JSON.stringify(minimalBody)
-                });
-              } catch (err5) {
-                minimalBody.parent = { data_source_id: targetDbId };
-                res = await this._request(`pages`, {
-                  method: 'POST',
-                  body: JSON.stringify(minimalBody)
-                });
-              }
-            }
-          }
-        } else {
-          // cover がない場合の最小プロパティ再試行
-          console.warn('[NotionClient] Retrying with minimal properties...');
-          const minimalProperties = {
-            [titlePropName]: properties[titlePropName]
-          };
-          if (properties[idPropName]) {
-            minimalProperties[idPropName] = properties[idPropName];
-          }
-          const minimalBody = {
-            parent: { database_id: targetDbId },
-            properties: minimalProperties
-          };
-          try {
-            res = await this._request(`pages`, {
-              method: 'POST',
-              body: JSON.stringify(minimalBody)
-            });
-          } catch (err3) {
-            minimalBody.parent = { data_source_id: targetDbId };
-            res = await this._request(`pages`, {
-              method: 'POST',
-              body: JSON.stringify(minimalBody)
-            });
+          } catch (err4) {
+            lastError = err4;
           }
         }
       }
     }
 
     if (!res) {
-      throw new Error('Notionデータベースへのアイテム登録に失敗しました。Notionのアクセス権限またはプロパティ設定をご確認ください。');
+      throw new Error(`Notionへの登録に失敗しました: ${lastError?.message || '不明なエラー'}`);
     }
+
     return this._normalizeRecord(res);
   }
 

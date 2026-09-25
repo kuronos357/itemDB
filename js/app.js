@@ -658,48 +658,12 @@ class Application {
         ? state.currentLocation.pageId
         : null;
 
-      let finalAttributes = formData.attributes || [];
-
-      // タイトルが入力されており、属性が未分類（空または市販品のみ）の場合は登録前にJevまたはGemini分類を試行
-      if ((finalAttributes.length === 0 || (finalAttributes.length === 1 && finalAttributes[0] === '市販品')) &&
-          formData.title && !formData.title.startsWith('市販品 (JAN:')) {
-        try {
-          const candidateAttrs = await notion.getAttributeOptions();
-          if (candidateAttrs.length > 0) {
-            if (state.config.jevApiKey) {
-              const jevAttrs = await JevService.classify(
-                formData.title,
-                state.config.jevApiKey,
-                candidateAttrs,
-                { maxAttributes: state.config.jevMaxAttributes }
-              );
-              if (Array.isArray(jevAttrs) && jevAttrs.length > 0) {
-                finalAttributes = jevAttrs;
-              }
-            } else if (state.config.geminiApiKey) {
-              const geminiAttrs = await GeminiService.classifyAttributes(
-                formData.title,
-                state.config.geminiApiKey,
-                candidateAttrs,
-                state.config.jevMaxAttributes || 3
-              );
-              if (Array.isArray(geminiAttrs) && geminiAttrs.length > 0) {
-                finalAttributes = geminiAttrs;
-              }
-            }
-          }
-        } catch (clsErr) {
-          console.warn('[App] Classification on register failed:', clsErr);
-        }
-      }
-
       const record = await notion.createRecord({
-        numericId: null, // Notion側で自動採番
         name: formData.title,
         isItem: true,
         locationPageId: assignedLocationPageId,
         details: formData.details,
-        attributes: finalAttributes,
+        attributes: formData.attributes || [],
         isAutoRegistered: true,
         coverUrl: formData.coverUrl,
         code: formData.code

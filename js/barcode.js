@@ -80,53 +80,67 @@ export class BarcodeService {
       result = await this._lookupJan(code, options);
       const candidateAttrs = Array.isArray(options.candidateAttributes) ? options.candidateAttributes : [];
 
-      // 1. Gemini による商品名スマート要約（長文SEOタイトルの場合またはGemini有効時）
-      if (options.geminiApiKey && result.title && !result.title.startsWith('市販品 (JAN:')) {
-        try {
-          result.title = await GeminiService.cleanProductTitle(result.title, options.geminiApiKey, options.geminiModel);
-        } catch (geminiErr) {
-          console.warn('[BarcodeService] Gemini title cleanup error:', geminiErr);
-        }
+      // AI処理を並行実行 (商品名要約と属性分類を同時に行い、待ち時間を半減)
+      const aiTasks = [];
+
+      // 1. 商品名スマート整形 (Gemini): タイトルが長文(30文字以上)または記号が多い場合に優先実行
+      if (options.geminiApiKey && result.title && !result.title.startsWith('市販品 (JAN:') && result.title.length > 25) {
+        aiTasks.push(
+          GeminiService.cleanProductTitle(result.title, options.geminiApiKey, options.geminiModel)
+            .then(cleanTitle => {
+              if (cleanTitle) result.title = cleanTitle;
+            })
+            .catch(geminiErr => {
+              console.warn('[BarcodeService] Gemini title cleanup error:', geminiErr);
+            })
+        );
       }
 
-      // 2. 属性（カテゴリ）自動分類 (Jev 優先、フォールバックで Gemini)
-      let classifiedAttrs = [];
-
-      if (options.jevApiKey && result.title && !result.title.startsWith('市販品 (JAN:') && candidateAttrs.length > 0) {
-        try {
-          const categories = await JevService.classify(
-            result.title,
-            options.jevApiKey,
-            candidateAttrs,
-            { maxAttributes: options.jevMaxAttributes }
-          );
-          if (Array.isArray(categories) && categories.length > 0) {
-            classifiedAttrs = categories;
+      // 2. 属性（カテゴリ）自動分類 (Jev / Gemini): タイトル整形と同時に並行して実行
+      if (candidateAttrs.length > 0 && result.title && !result.title.startsWith('市販品 (JAN:')) {
+        const classifyTask = async () => {
+          let classified = [];
+          if (options.jevApiKey) {
+            try {
+              const cats = await JevService.classify(
+                result.title,
+                options.jevApiKey,
+                candidateAttrs,
+                { maxAttributes: options.jevMaxAttributes }
+              );
+              if (Array.isArray(cats) && cats.length > 0) classified = cats;
+            } catch (e) {
+              console.warn('[BarcodeService] Jev error:', e);
+            }
           }
-        } catch (e) {
-          console.warn('[BarcodeService] Jev classification error:', e);
-        }
+          if (classified.length === 0 && options.geminiApiKey) {
+            try {
+              const maxN = Math.max(1, parseInt(options.jevMaxAttributes, 10) || 3);
+              const cats = await GeminiService.classifyAttributes(
+                result.title,
+                options.geminiApiKey,
+                candidateAttrs,
+                maxN,
+                options.geminiModel
+              );
+              if (Array.isArray(cats) && cats.length > 0) classified = cats;
+            } catch (e) {
+              console.warn('[BarcodeService] Gemini classify error:', e);
+            }
+          }
+          if (classified.length > 0) {
+            result.attributes = classified;
+          }
+        };
+
+        aiTasks.push(classifyTask());
       }
 
-      // Jevで分類できなかった場合、Geminiで属性分類を試行
-      if (classifiedAttrs.length === 0 && options.geminiApiKey && result.title && !result.title.startsWith('市販品 (JAN:') && candidateAttrs.length > 0) {
-        try {
-          const maxN = Math.max(1, parseInt(options.jevMaxAttributes, 10) || 3);
-          classifiedAttrs = await GeminiService.classifyAttributes(
-            result.title,
-            options.geminiApiKey,
-            candidateAttrs,
-            maxN,
-            options.geminiModel
-          );
-        } catch (geminiClassifyErr) {
-          console.warn('[BarcodeService] Gemini classification error:', geminiClassifyErr);
-        }
+      if (aiTasks.length > 0) {
+        await Promise.all(aiTasks);
       }
 
-      if (classifiedAttrs.length > 0) {
-        result.attributes = classifiedAttrs;
-      } else if (!result.attributes || result.attributes.length === 0) {
+      if (!result.attributes || result.attributes.length === 0) {
         result.attributes = candidateAttrs.includes('市販品') ? ['市販品'] : [];
       }
 

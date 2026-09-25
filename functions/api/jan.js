@@ -3,7 +3,7 @@
  * 
  * Yahoo!ショッピング商品検索API (v3) を中継し、CORSを回避して
  * 日本国内のJANコードから商品名・メーカー・カテゴリ・高画質商品画像を取得します。
- * Yahoo Client ID未設定時や未ヒット時は Open Food Facts / Google Books へ自動フォールバックします。
+ * 高速応答のため、結果件数の最小化(2件)とタイムアウト制御、インメモリキャッシュを適用しています。
  */
 
 function cleanProductName(name) {
@@ -50,7 +50,7 @@ export async function onRequest(context) {
     });
   }
 
-  // キャッシュヒットの確認 (同じコードであれば即座に応答)
+  // 1. キャッシュヒットの確認 (即座に0ms返却)
   const cached = JAN_CACHE.get(code);
   if (cached && (Date.now() - cached.timestamp) < CACHE_TTL_MS) {
     return new Response(JSON.stringify(cached.data), {
@@ -62,12 +62,13 @@ export async function onRequest(context) {
   let yahooErrorMsg = null;
   if (appId) {
     try {
-      // 1. jan_code パラメータで厳密検索
-      const yUrl = `https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch?appid=${encodeURIComponent(appId)}&jan_code=${encodeURIComponent(code)}&results=5`;
+      // 1. jan_code パラメータで厳密検索 (results=2 で最速化)
+      const yUrl = `https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch?appid=${encodeURIComponent(appId)}&jan_code=${encodeURIComponent(code)}&results=2`;
       const yRes = await fetch(yUrl, {
         headers: {
           "User-Agent": `itemDB-Cloudflare/1.0; Yahoo AppID: ${appId}`
-        }
+        },
+        signal: AbortSignal.timeout(2500)
       });
 
       let yData = null;
@@ -83,13 +84,14 @@ export async function onRequest(context) {
         }
       }
 
-      // 2. jan_codeで0件の場合、query=JANコードでキーワード検索フォールバック
+      // 2. jan_codeで0件の場合のみ、query=JANコードで高速フォールバック
       if (yData && (!yData.hits || yData.hits.length === 0) && !yahooErrorMsg) {
-        const queryUrl = `https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch?appid=${encodeURIComponent(appId)}&query=${encodeURIComponent(code)}&results=5`;
+        const queryUrl = `https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch?appid=${encodeURIComponent(appId)}&query=${encodeURIComponent(code)}&results=2`;
         const qRes = await fetch(queryUrl, {
           headers: {
             "User-Agent": `itemDB-Cloudflare/1.0; Yahoo AppID: ${appId}`
-          }
+          },
+          signal: AbortSignal.timeout(2000)
         });
         if (qRes.ok) {
           const qData = await qRes.json();
@@ -99,6 +101,7 @@ export async function onRequest(context) {
         }
       }
 
+      // ヒットした場合の最適タイトル抽出
       if (yData && yData.hits && yData.hits.length > 0) {
         const validHits = yData.hits.filter(h => h && h.name && cleanProductName(h.name).length > 0);
         if (validHits.length > 0) {
@@ -151,11 +154,12 @@ export async function onRequest(context) {
     }
   }
 
-  // 2. Open Food Facts API フォールバック
+  // 3. Open Food Facts API フォールバック (タイムアウト1.2秒で高速化)
   try {
     const offUrl = `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json`;
     const offRes = await fetch(offUrl, {
-      headers: { "User-Agent": "itemDB - Web - 1.0" }
+      headers: { "User-Agent": "itemDB - Web - 1.0" },
+      signal: AbortSignal.timeout(1200)
     });
     if (offRes.ok) {
       const offData = await offRes.json();
@@ -169,7 +173,7 @@ export async function onRequest(context) {
         }
 
         if (title) {
-          return new Response(JSON.stringify({
+          const offPayload = {
             found: true,
             source: "openfoodfacts",
             code,
@@ -177,7 +181,10 @@ export async function onRequest(context) {
             brand,
             category: p.categories || "",
             imageUrl
-          }), {
+          };
+          JAN_CACHE.set(code, { timestamp: Date.now(), data: offPayload });
+
+          return new Response(JSON.stringify(offPayload), {
             status: 200,
             headers: corsHeaders
           });
@@ -185,13 +192,15 @@ export async function onRequest(context) {
       }
     }
   } catch (offErr) {
-    console.warn(`[OpenFoodFacts Exception] ${offErr.message}`);
+    // タイムアウトまたは失敗時は次へ
   }
 
-  // 3. Google Books API フォールバック (書籍・雑誌・ムック等のJAN)
+  // 4. Google Books API フォールバック (タイムアウト1.2秒)
   try {
     const gUrl = `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(code)}`;
-    const gRes = await fetch(gUrl);
+    const gRes = await fetch(gUrl, {
+      signal: AbortSignal.timeout(1200)
+    });
     if (gRes.ok) {
       const gData = await gRes.json();
       if (gData.items && gData.items.length > 0) {
@@ -205,7 +214,7 @@ export async function onRequest(context) {
         }
 
         if (title) {
-          return new Response(JSON.stringify({
+          const gPayload = {
             found: true,
             source: "googlebooks",
             code,
@@ -214,7 +223,10 @@ export async function onRequest(context) {
             author,
             category: "書籍",
             imageUrl
-          }), {
+          };
+          JAN_CACHE.set(code, { timestamp: Date.now(), data: gPayload });
+
+          return new Response(JSON.stringify(gPayload), {
             status: 200,
             headers: corsHeaders
           });
@@ -222,10 +234,10 @@ export async function onRequest(context) {
       }
     }
   } catch (gErr) {
-    console.warn(`[GoogleBooks Exception] ${gErr.message}`);
+    // タイムアウトまたは失敗
   }
 
-  // 4. 見つからなかった場合
+  // 5. 見つからなかった場合
   return new Response(JSON.stringify({
     found: false,
     code,
