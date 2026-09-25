@@ -46,11 +46,22 @@ class Application {
     // 4. Web NFC をバックグラウンドで開始（対応ブラウザのみ）
     scanner.startNfc().catch(() => {});
 
-    // 5. Service Worker登録 (PWA)
+    // 5. Service Worker登録 (PWA: 新バージョン検知時に自動更新)
     if ('serviceWorker' in navigator && window.location.protocol === 'https:') {
       navigator.serviceWorker.register('./sw.js').then((reg) => {
-        // 起動時に最新のService Workerがあるか即座に確認
         reg.update().catch(() => {});
+        reg.addEventListener('updatefound', () => {
+          const installing = reg.installing;
+          if (installing) {
+            installing.addEventListener('statechange', () => {
+              if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+                console.info('[PWA] 新しいバージョンがインストールされました。画面を自動更新します。');
+                ui.showToast('新しいバージョンへ更新しました', 'info', 3000);
+                setTimeout(() => window.location.reload(), 1000);
+              }
+            });
+          }
+        });
       }).catch(err => {
         console.warn('[PWA] Service Worker registration failed:', err);
       });
@@ -547,7 +558,8 @@ class Application {
           name: `${typeName} #${numericStr}`,
           isItem
         });
-        ui.showToast(`${typeName} #${numericStr} をNotionに登録しました`, 'success');
+        ui.showToast(`✓ ${typeName} #${numericStr} をNotionに登録しました`, 'success', 4000);
+        alert(`【Notion新規作成 成功】\n\n${typeName} #${numericStr} をNotionに作成しました！`);
       }
 
       state.addHistory({
@@ -586,7 +598,8 @@ class Application {
         await this.switchMode(AppMode.LOCATION_VIEW);
       }
     } catch (err) {
-      ui.showToast(`取得エラー: ${err.message}`, 'error');
+      ui.showToast(`取得エラー: ${err.message}`, 'error', 8000);
+      alert(`【エラー】\n\n${err.message}`);
       feedback.playError();
     } finally {
       ui.setLoading(false);
@@ -669,9 +682,6 @@ class Application {
         code: formData.code
       });
 
-      feedback.playSuccess();
-      ui.showToast(`「${record.name}」をNotionに登録しました！`, 'success', 3500);
-
       // 履歴に追加
       state.addHistory({
         id: record.id != null ? record.id : record.pageId.slice(0, 8),
@@ -689,9 +699,25 @@ class Application {
         // ホーム画面の履歴等を再描画
         ui.renderHomeView();
       }
+
+      feedback.playSuccess();
+      ui.setLoading(false);
+
+      // 成否の明示的なポップアップ通知 (alert & toast)
+      ui.showToast(`✓ Notionに登録完了: 「${record.name}」`, 'success', 5000);
+      alert(`【Notion登録 成功】\n\n「${record.name}」を目録データベースに登録しました！\n\n・管理ID: ${record.id != null ? '#' + record.id : record.pageId.slice(0, 8)}\n・詳細: ${formData.details ? '記載あり' : 'なし'}`);
+
+      return true;
     } catch (err) {
+      console.error('[App] Barcode item registration failed:', err);
       feedback.playError();
-      ui.showToast(`Notion登録エラー: ${err.message}`, 'error');
+      ui.setLoading(false);
+
+      // エラー本文をポップアップ (alert) で画面中央に明示表示
+      ui.showToast(`✕ 登録エラー: ${err.message}`, 'error', 10000);
+      alert(`【Notion登録 失敗】\n\nNotionへの登録中にエラーが発生しました。\n\n【詳細メッセージ】\n${err.message}\n\n入力内容は保持されています。内容を確認・修正して再試行してください。`);
+
+      return false;
     } finally {
       ui.setLoading(false);
     }

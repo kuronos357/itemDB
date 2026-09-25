@@ -1035,10 +1035,10 @@ class UIManager {
       }
     }
 
-    // 登録ボタンのハンドラ配線
+    // 登録ボタンのハンドラ配線 (成功時のみモーダルを閉じ、エラー時は入力内容を保持)
     const submitBtn = document.getElementById('btn-submit-barcode');
     if (submitBtn) {
-      submitBtn.onclick = () => {
+      submitBtn.onclick = async () => {
         const fallbackName = itemData.isIsbn ? `書籍 (${itemData.code})` : `市販品 (${itemData.code})`;
         const editedTitle = titleInput?.value.trim() || itemData.title || fallbackName;
         const rawAttr = attrInput?.value.trim() || '';
@@ -1047,17 +1047,27 @@ class UIManager {
           : (itemData.attributes || []);
         const editedDetails = detailsInput?.value.trim() || itemData.details || '';
 
-        this.closeBarcodeModal();
-
         if (this.barcodeRegisterCallback) {
-          this.barcodeRegisterCallback({
-            code: itemData.code,
-            isIsbn: itemData.isIsbn,
-            title: editedTitle,
-            attributes: editedAttrs,
-            details: editedDetails,
-            coverUrl: itemData.coverUrl || null
-          });
+          const originalText = submitBtn.textContent;
+          submitBtn.disabled = true;
+          submitBtn.textContent = '登録中...';
+
+          try {
+            const success = await this.barcodeRegisterCallback({
+              code: itemData.code,
+              isIsbn: itemData.isIsbn,
+              title: editedTitle,
+              attributes: editedAttrs,
+              details: editedDetails,
+              coverUrl: itemData.coverUrl || null
+            });
+            if (success) {
+              this.closeBarcodeModal();
+            }
+          } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalText;
+          }
         }
       };
     }
