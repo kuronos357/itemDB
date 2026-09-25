@@ -59,12 +59,27 @@ export class GeminiService {
     };
 
     let res = null;
+    let proxyError = null;
     try {
       res = await doFetch(endpoint);
+      if (!res.ok) {
+        proxyError = `Proxy HTTP ${res.status}`;
+      }
     } catch (e) {
-      // 直通エンドポイントへフォールバック
+      proxyError = e.message;
+    }
+
+    // プロキシが未デプロイ(404等)または失敗した場合はGoogle直通エンドポイントへフォールバック
+    if (!res || !res.ok) {
       const directUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(cleanKey)}`;
-      res = await doFetch(directUrl);
+      try {
+        const directRes = await doFetch(directUrl);
+        if (directRes.ok || !res) {
+          res = directRes;
+        }
+      } catch (directErr) {
+        if (!res) throw new Error(`通信失敗: ${proxyError || directErr.message}`);
+      }
     }
 
     if (!res.ok) {
@@ -89,9 +104,10 @@ export class GeminiService {
    * @param {string} rawTitle ECモールの長文タイトル
    * @param {string} apiKey Gemini APIキー
    * @param {string} [model] 使用モデル名
+   * @param {boolean} [throwOnError=false] エラー時に例外を再スローするか
    * @returns {Promise<string>} 整形後の商品名
    */
-  static async cleanProductTitle(rawTitle, apiKey, model = null) {
+  static async cleanProductTitle(rawTitle, apiKey, model = null, throwOnError = false) {
     if (!rawTitle || !apiKey) return rawTitle || '';
 
     const prompt = `あなたは商品管理データベースのデータクレンジング専門AIです。
@@ -117,6 +133,7 @@ ${rawTitle}`;
       return result || rawTitle;
     } catch (err) {
       console.warn('[GeminiService] Clean title error:', err);
+      if (throwOnError) throw err;
       return rawTitle;
     }
   }
@@ -183,8 +200,15 @@ ${JSON.stringify(candidateAttributes)}
     const startTime = performance.now();
     try {
       const testTitle = '【送料無料】コクヨ ドットライナー つめ替え用テープ 8.4mm×16m タ-D400-08N 10個セット [新品]';
-      const cleaned = await this.cleanProductTitle(testTitle, apiKey, targetModel);
+      const cleaned = await this.cleanProductTitle(testTitle, apiKey, targetModel, true);
       const duration = Math.round(performance.now() - startTime);
+
+      if (cleaned === testTitle) {
+        return {
+          ok: false,
+          message: `モデル「${targetModel}」からの応答がありませんでした（未整形）。APIキーまたはモデル名をご確認ください。`
+        };
+      }
 
       return {
         ok: true,
@@ -194,7 +218,7 @@ ${JSON.stringify(candidateAttributes)}
     } catch (err) {
       return {
         ok: false,
-        message: `接続エラー: ${err.message}`
+        message: `接続エラー (${targetModel}): ${err.message}`
       };
     }
   }

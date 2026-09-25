@@ -46,10 +46,10 @@ export async function onRequest(context) {
     });
   }
 
-  // 1. Yahoo!ショッピング商品検索API (v3)
+  let yahooErrorMsg = null;
   if (appId) {
     try {
-      // 5件取得して、最もSEOキーワード盛りの少ないシンプルなタイトルを自動選定
+      // 5件取得して、最もシンプルなタイトルを選定
       const yUrl = `https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch?appid=${encodeURIComponent(appId)}&jan_code=${encodeURIComponent(code)}&results=5`;
       const yRes = await fetch(yUrl, {
         headers: {
@@ -95,13 +95,21 @@ export async function onRequest(context) {
             status: 200,
             headers: corsHeaders
           });
+        } else {
+          yahooErrorMsg = "Yahoo!商品検索で該当する商品が見つかりませんでした (ヒット数0件)";
         }
       } else {
         const errText = await yRes.text();
         console.warn(`[Yahoo API Error] status=${yRes.status} body=${errText}`);
+        if (yRes.status === 401 || yRes.status === 403) {
+          yahooErrorMsg = `Yahoo! APIエラー (HTTP ${yRes.status}): Client IDが無効か、未承認の可能性があります`;
+        } else {
+          yahooErrorMsg = `Yahoo! APIエラー (HTTP ${yRes.status})`;
+        }
       }
     } catch (yErr) {
       console.warn(`[Yahoo API Exception] ${yErr.message}`);
+      yahooErrorMsg = `Yahoo! 通信エラー: ${yErr.message}`;
     }
   }
 
@@ -185,7 +193,7 @@ export async function onRequest(context) {
     code,
     title: "",
     hasAppId: Boolean(appId),
-    message: appId ? "商品情報が見つかりませんでした" : "商品情報が見つかりませんでした（Yahoo Client IDを設定すると高精度で取得できます）"
+    message: yahooErrorMsg || (appId ? "商品情報が見つかりませんでした" : "商品情報が見つかりませんでした（Yahoo Client IDを設定すると高精度で取得できます）")
   }), {
     status: 200,
     headers: corsHeaders
