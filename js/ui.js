@@ -587,14 +587,51 @@ class UIManager {
       } else if (itemDbId || rawDbId) {
         detectedEl.innerHTML = `✓ 接続中のID: <code>${itemDbId || rawDbId}</code>`;
       } else {
-        detectedEl.textContent = '物品DBまたは場所DBのURLを貼り付けると、リレーションからもう片方のDBも自動判別・連携されます。';
+        detectedEl.textContent = '親DBまたは物品/場所DBのURLを貼り付けると、全テーブルが自動検出・連携されます。';
       }
     }
+
+    // Notion設定ページリンクの更新
+    const linkOpenNotion = document.getElementById('link-open-notion-settings');
+    if (linkOpenNotion) {
+      if (state.config.configDbId) {
+        linkOpenNotion.href = `https://www.notion.so/${state.config.configDbId.replace(/-/g, '')}`;
+      } else if (state.config.dbId && state.config.dbId.startsWith('http')) {
+        linkOpenNotion.href = state.config.dbId;
+      }
+    }
+
+    // 連携状況バッジの更新
+    this._updateSyncBadges();
 
     const syncStatusEl = document.getElementById('notion-sync-status-msg');
     if (syncStatusEl) syncStatusEl.textContent = '';
 
     modal.classList.remove('hidden');
+  }
+
+  /**
+   * 各サービスの連携状況バッジを描画
+   */
+  _updateSyncBadges() {
+    const container = document.getElementById('sync-badges-container');
+    if (!container) return;
+
+    const { yahooAppId, geminiApiKey, jevApiKey, itemDbId, locationDbId, configDbId } = state.config;
+    const items = [
+      { label: 'Yahoo!商品検索', active: Boolean(yahooAppId) },
+      { label: 'Gemini 2.5', active: Boolean(geminiApiKey) },
+      { label: 'Jev属性分類', active: Boolean(jevApiKey) },
+      { label: '物品/場所DB', active: Boolean(itemDbId && locationDbId) },
+      { label: '設定テーブル', active: Boolean(configDbId) }
+    ];
+
+    container.innerHTML = items.map(item => `
+      <span class="badge" style="font-size: 0.7rem; padding: 2px 7px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; background: ${item.active ? 'rgba(34, 197, 94, 0.15)' : 'rgba(148, 163, 184, 0.12)'}; color: ${item.active ? '#4ade80' : '#94a3b8'}; border: 1px solid ${item.active ? 'rgba(34, 197, 94, 0.3)' : 'rgba(148, 163, 184, 0.2)'};">
+        <span>${item.active ? '✓' : '○'}</span>
+        <span>${item.label}</span>
+      </span>
+    `).join('');
   }
 
   setLoading(isLoading, text = '処理中...') {

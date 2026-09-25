@@ -983,6 +983,7 @@ class Application {
         statusEl.innerHTML = msg;
       }
       statusEl.className = 'status-text text-success';
+      ui._updateSyncBadges();
       feedback.playSuccess();
 
       const detectedEl = document.getElementById('detected-db-id');
@@ -1035,8 +1036,11 @@ class Application {
       }
       const data = await res.json();
       if (data.found && data.title) {
+        state.config.yahooAppId = yahooAppId;
+        state.saveConfig(state.config);
         statusEl.innerHTML = `✓ 接続成功！<br>「${data.title}」を取得できました（ブランド: ${data.brand || 'なし'}）`;
         statusEl.className = 'status-text text-success';
+        ui._updateSyncBadges();
         feedback.playSuccess();
       } else {
         statusEl.textContent = `✕ 取得失敗: ${data.message || '商品が見つかりませんでした'}`;
@@ -1074,8 +1078,11 @@ class Application {
     try {
       const res = await JevService.testConnection(jevApiKey);
       if (res.ok) {
+        state.config.jevApiKey = jevApiKey;
+        state.saveConfig(state.config);
         statusEl.innerHTML = `✓ ${res.message}`;
         statusEl.className = 'status-text text-success';
+        ui._updateSyncBadges();
         feedback.playSuccess();
       } else {
         statusEl.textContent = `✕ ${res.message}`;
@@ -1113,8 +1120,11 @@ class Application {
     try {
       const res = await GeminiService.testConnection(geminiApiKey);
       if (res.ok) {
+        state.config.geminiApiKey = geminiApiKey;
+        state.saveConfig(state.config);
         statusEl.innerHTML = `✓ ${res.message}`;
         statusEl.className = 'status-text text-success';
+        ui._updateSyncBadges();
         feedback.playSuccess();
       } else {
         statusEl.textContent = `✕ ${res.message}`;
@@ -1222,6 +1232,7 @@ class Application {
         geminiApiKey
       });
 
+      ui._updateSyncBadges();
       feedback.playSuccess();
       const msg = `✓ Notionの設定テーブルに${count}件の設定を書き込みました！`;
       if (statusEl) {

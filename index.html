@@ -34,7 +34,7 @@
       <div class="logo-section">
         <div style="display: flex; align-items: baseline; gap: 6px;">
           <h1 class="app-title">itemDB</h1>
-          <span class="badge" style="font-size: 0.7rem; padding: 1px 5px; background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 4px; font-weight: 500;">v33</span>
+          <span class="badge" style="font-size: 0.7rem; padding: 1px 5px; background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 4px; font-weight: 500;">v34</span>
         </div>
         <span class="app-subtitle">Logistics & Cache</span>
       </div>
@@ -91,109 +91,135 @@
 
   <!-- 設定モーダル -->
   <div id="settings-modal" class="modal-backdrop hidden">
-    <div class="modal-content">
+    <div class="modal-content" style="max-height: 90vh; display: flex; flex-direction: column;">
       <div class="modal-header">
-        <h3>Notion連携設定</h3>
+        <div class="modal-title-row">
+          <span class="modal-icon">⚙️</span>
+          <h3>Notion連携設定</h3>
+        </div>
         <button id="btn-close-settings" class="icon-btn">✕</button>
       </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label for="input-api-key">Notion API トークン (Secret)</label>
-          <input type="password" id="input-api-key" class="form-input" placeholder="secret_xxxxxxxxxxxxxxxx">
-          <span class="text-sub">インテグレーションの内部トークンを入力します。</span>
-        </div>
-
-        <div class="form-group">
-          <label for="input-db-id">Notion データベースのURL または ID</label>
-          <input type="text" id="input-db-id" class="form-input" placeholder="https://app.notion.com/... または 32桁のID">
-          <span id="detected-db-id" class="text-sub">物品DBまたは場所DBのURLを貼り付けると、リレーションからもう片方のDBも自動判別・連携されます。</span>
-        </div>
-
-        <div class="form-group mt-2">
-          <label for="input-yahoo-app-id">Yahoo! Client ID (appid) <small style="color: var(--text-muted); font-size: 0.75rem;">[推奨 / 任意]</small></label>
-          <input type="text" id="input-yahoo-app-id" class="form-input" placeholder="dj00aiZpPVhYWFhYWFhYWFhYW..." autocomplete="off">
-          <span class="text-sub">
-            日本の市販品JANコードから商品名・メーカー・画像を高精度に自動取得します（<a href="https://developer.yahoo.co.jp/" target="_blank" rel="noopener" style="color: var(--color-item); text-decoration: underline;">Yahoo!デベロッパーネットワーク</a>で無料・即時発行可能 / 1日5万回無料）。
-          </span>
-        </div>
-
-        <div class="form-group mt-2">
-          <label for="input-jev-api-key">Jev APIキー (TypeSafe AI) <small style="color: var(--text-muted); font-size: 0.75rem;">[任意]</small></label>
-          <input type="password" id="input-jev-api-key" class="form-input" placeholder="jev_xxxxxxxxxxxxxxxx">
-          <span class="text-sub">JANコード読み取り時、商品名からNotion属性を高精度に自動分類します。</span>
-        </div>
-
-        <div class="form-group mt-2">
-          <label for="input-jev-max-attributes">Jev 属性自動分類の最大採用数</label>
-          <input type="number" id="input-jev-max-attributes" class="form-input" min="1" max="10" value="3" placeholder="3">
-          <span class="text-sub">確率の最大落差で抽出した属性のうち、上位最大何件まで採用するかを指定します（初期値: 3）。</span>
-        </div>
-
-        <div class="form-group mt-2">
-          <label for="input-gemini-api-key">Gemini APIキー (Google AI Studio) <small style="color: var(--text-muted); font-size: 0.75rem;">[任意 / AI Pro特典対応]</small></label>
-          <input type="password" id="input-gemini-api-key" class="form-input" placeholder="AIzaSyxxxxxxxxxxxxxxxxx">
-          <span class="text-sub">JANコードの長文タイトルを洗練された商品名に要約・整形し、属性の自動分類フォールバックにも使用します（Gemini 2.5 Flash）。</span>
-        </div>
-
-        <div class="form-group mt-2">
-          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-            <button id="btn-test-connection" class="btn btn-secondary" style="flex: 1; min-width: 110px;">
-              <span>Notion 疎通テスト</span>
-            </button>
-            <button id="btn-test-yahoo" class="btn btn-secondary" style="flex: 1; min-width: 110px;">
-              <span>Yahoo! 接続テスト</span>
-            </button>
-            <button id="btn-test-jev" class="btn btn-secondary" style="flex: 1; min-width: 110px;">
-              <span>Jev 接続テスト</span>
-            </button>
-            <button id="btn-test-gemini" class="btn btn-secondary" style="flex: 1; min-width: 110px;">
-              <span>Gemini 接続テスト</span>
-            </button>
+      <div class="modal-body" style="overflow-y: auto; padding-right: 4px;">
+        <!-- セクション1: 基本接続 -->
+        <div class="settings-card" style="background: rgba(30, 41, 59, 0.45); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px; margin-bottom: 12px;">
+          <h4 style="margin: 0 0 8px; font-size: 0.88rem; display: flex; align-items: center; gap: 6px;">
+            <span>🔑 基本接続</span>
+            <span class="badge badge-even" style="font-size: 0.65rem; padding: 1px 5px;">必須</span>
+          </h4>
+          <div class="form-group" style="margin-bottom: 8px;">
+            <label for="input-api-key" style="font-size: 0.8rem;">Notion API トークン (Secret)</label>
+            <input type="password" id="input-api-key" class="form-input" placeholder="secret_xxxxxxxxxxxxxxxx" style="font-size: 0.85rem;">
           </div>
-          <span id="connection-status-msg" class="status-text mt-2"></span>
-          <span id="yahoo-status-msg" class="status-text mt-1"></span>
-          <span id="jev-status-msg" class="status-text mt-1"></span>
-          <span id="gemini-status-msg" class="status-text mt-1"></span>
-        </div>
-
-        <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 8px 0;">
-
-        <div class="form-group">
-          <label>Notion側設定テーブルと同期</label>
-          <p class="text-sub">Notion内の「設定」テーブルから各種APIキー・IDを一括同期、または現在の設定をNotionに保存します。</p>
-          <div style="display: flex; gap: 8px; flex-wrap: wrap;" class="mt-2">
-            <button id="btn-sync-load-notion" class="btn btn-secondary" style="flex: 1; min-width: 140px;">
-              <span>📥 Notionから設定を読込</span>
-            </button>
-            <button id="btn-sync-save-notion" class="btn btn-secondary" style="flex: 1; min-width: 140px;">
-              <span>📤 Notionへ設定を書出</span>
-            </button>
-          </div>
-          <span id="notion-sync-status-msg" class="status-text mt-1"></span>
-        </div>
-
-        <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 8px 0;">
-
-        <div class="form-group">
-          <label>別端末 (スマホ/Apple Watch) 連携</label>
-          <p class="text-sub">この端末で保存した設定を他の端末に簡単に引き継ぐことができます。</p>
-          <div style="display: flex; gap: 8px; flex-wrap: wrap;" class="mt-2">
-            <button id="btn-generate-setup-qr" class="btn btn-secondary" style="flex: 1;">
-              <span>設定用QRを生成</span>
-            </button>
-            <button id="btn-copy-setup-url" class="btn btn-secondary" style="flex: 1;">
-              <span>📋 設定用URLをコピー</span>
-            </button>
-          </div>
-          <div id="setup-qr-wrapper" class="mt-3 hidden" style="text-align: center;">
-            <div id="setup-qr-preview" style="display: inline-block; padding: 10px; background: #fff; border-radius: 8px;"></div>
-            <p class="text-sub mt-2">このQRコードをカメラで読み取ると自動設定されます。</p>
+          <div class="form-group" style="margin-bottom: 2px;">
+            <label for="input-db-id" style="font-size: 0.8rem;">データベースまたは設定ページのURL / ID</label>
+            <input type="text" id="input-db-id" class="form-input" placeholder="https://app.notion.com/... または 32桁のID" style="font-size: 0.85rem;">
+            <span id="detected-db-id" class="text-sub" style="font-size: 0.72rem; margin-top: 4px; line-height: 1.4;">親DBのURLを貼り付けると、物品・場所・設定テーブルが全自動で連携されます。</span>
           </div>
         </div>
+
+        <!-- セクション2: Notion設定テーブル同期 (メイン導線) -->
+        <div class="settings-card" style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: var(--radius-md); padding: 12px; margin-bottom: 12px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <h4 style="margin: 0; font-size: 0.88rem; display: flex; align-items: center; gap: 6px; color: var(--color-item);">
+              <span>📑 Notion設定テーブル同期</span>
+            </h4>
+            <a id="link-open-notion-settings" href="https://app.notion.com/p/kuronos/3dc5e314fd47802eb00af61c71937780?v=3e65e314fd47805ca491000ce71e0def" target="_blank" rel="noopener" class="btn-link" style="font-size: 0.75rem; text-decoration: underline; color: #38bdf8;">
+              Notion設定を開く ↗
+            </a>
+          </div>
+          <p class="text-sub" style="font-size: 0.75rem; margin: 0 0 10px; line-height: 1.4;">
+            APIキー等の設定をNotion側ページにまとめて一括管理できます。
+          </p>
+
+          <!-- サービス連携状況バッジ一覧 -->
+          <div id="sync-badges-container" style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px;"></div>
+
+          <div style="display: flex; gap: 8px;">
+            <button id="btn-sync-load-notion" class="btn btn-primary" style="flex: 1; font-size: 0.82rem; padding: 8px 6px;">
+              <span>📥 Notionから読込</span>
+            </button>
+            <button id="btn-sync-save-notion" class="btn btn-secondary" style="flex: 1; font-size: 0.82rem; padding: 8px 6px;">
+              <span>📤 Notionへ書出</span>
+            </button>
+          </div>
+          <span id="notion-sync-status-msg" class="status-text mt-1" style="font-size: 0.75rem;"></span>
+        </div>
+
+        <!-- セクション3: 詳細設定・手動入力・接続テスト (折りたたみ) -->
+        <details id="details-advanced-settings" style="background: rgba(30, 41, 59, 0.3); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 8px 12px; margin-bottom: 10px;">
+          <summary style="font-size: 0.82rem; font-weight: 600; cursor: pointer; color: var(--text-muted); user-select: none;">
+            ⚙️ 詳細設定・手動入力・接続テスト
+          </summary>
+          <div class="mt-2" style="border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 8px;">
+            <!-- 疎通テストボタン群 -->
+            <label style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px; display: block;">各APIの疎通テスト</label>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;">
+              <button id="btn-test-connection" class="btn btn-secondary btn-sm" style="font-size: 0.75rem;">
+                <span>Notion 疎通</span>
+              </button>
+              <button id="btn-test-yahoo" class="btn btn-secondary btn-sm" style="font-size: 0.75rem;">
+                <span>Yahoo! 接続</span>
+              </button>
+              <button id="btn-test-jev" class="btn btn-secondary btn-sm" style="font-size: 0.75rem;">
+                <span>Jev 接続</span>
+              </button>
+              <button id="btn-test-gemini" class="btn btn-secondary btn-sm" style="font-size: 0.75rem;">
+                <span>Gemini 接続</span>
+              </button>
+            </div>
+            <span id="connection-status-msg" class="status-text mt-1" style="font-size: 0.72rem;"></span>
+            <span id="yahoo-status-msg" class="status-text mt-1" style="font-size: 0.72rem;"></span>
+            <span id="jev-status-msg" class="status-text mt-1" style="font-size: 0.72rem;"></span>
+            <span id="gemini-status-msg" class="status-text mt-1" style="font-size: 0.72rem;"></span>
+
+            <!-- 個別APIキー入力欄 -->
+            <div class="form-group mt-2">
+              <label for="input-yahoo-app-id" style="font-size: 0.78rem;">Yahoo! Client ID (appid)</label>
+              <input type="text" id="input-yahoo-app-id" class="form-input form-input-sm" placeholder="dj00aiZpPVhYWFhYWFhYWFhYW..." autocomplete="off" style="font-size: 0.8rem;">
+            </div>
+
+            <div class="form-group mt-1">
+              <label for="input-gemini-api-key" style="font-size: 0.78rem;">Gemini APIキー (Google AI Studio)</label>
+              <input type="password" id="input-gemini-api-key" class="form-input form-input-sm" placeholder="AIzaSyxxxxxxxxxxxxxxxxx" style="font-size: 0.8rem;">
+            </div>
+
+            <div class="form-group mt-1">
+              <label for="input-jev-api-key" style="font-size: 0.78rem;">Jev APIキー (TypeSafe AI)</label>
+              <input type="password" id="input-jev-api-key" class="form-input form-input-sm" placeholder="jev_xxxxxxxxxxxxxxxx" style="font-size: 0.8rem;">
+            </div>
+
+            <div class="form-group mt-1">
+              <label for="input-jev-max-attributes" style="font-size: 0.78rem;">Jev 属性最大採用数</label>
+              <input type="number" id="input-jev-max-attributes" class="form-input form-input-sm" min="1" max="10" value="3" style="font-size: 0.8rem;">
+            </div>
+          </div>
+        </details>
+
+        <!-- セクション4: 別端末連携 (折りたたみ) -->
+        <details id="details-device-sync" style="background: rgba(30, 41, 59, 0.3); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 8px 12px; margin-bottom: 4px;">
+          <summary style="font-size: 0.82rem; font-weight: 600; cursor: pointer; color: var(--text-muted); user-select: none;">
+            📱 別端末 (スマホ/Apple Watch) 連携
+          </summary>
+          <div class="mt-2" style="border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 8px;">
+            <p class="text-sub" style="font-size: 0.72rem; margin: 0 0 8px;">保存した設定（APIキー等）を他端末へ簡単に引き継げます。</p>
+            <div style="display: flex; gap: 8px;">
+              <button id="btn-generate-setup-qr" class="btn btn-secondary btn-sm" style="flex: 1; font-size: 0.75rem;">
+                <span>設定用QRを生成</span>
+              </button>
+              <button id="btn-copy-setup-url" class="btn btn-secondary btn-sm" style="flex: 1; font-size: 0.75rem;">
+                <span>📋 URLコピー</span>
+              </button>
+            </div>
+            <div id="setup-qr-wrapper" class="mt-2 hidden" style="text-align: center;">
+              <div id="setup-qr-preview" style="display: inline-block; padding: 8px; background: #fff; border-radius: 6px;"></div>
+              <p class="text-sub mt-1" style="font-size: 0.7rem;">カメラで読み取ると自動設定されます。</p>
+            </div>
+          </div>
+        </details>
       </div>
-      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
-        <span class="text-sub" style="font-size: 0.75rem; color: var(--text-muted);">itemDB Build 33</span>
-        <button id="btn-save-settings" class="btn btn-primary">設定を保存</button>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-color); padding: 12px 16px;">
+        <span class="text-sub" style="font-size: 0.75rem; color: var(--text-muted);">itemDB Build 34</span>
+        <button id="btn-save-settings" class="btn btn-primary" style="padding: 8px 20px;">設定を保存</button>
       </div>
     </div>
   </div>
