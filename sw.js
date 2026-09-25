@@ -3,7 +3,7 @@
  * アプリケーションシェルのオフラインキャッシュ
  */
 
-const CACHE_NAME = 'itemdb-cache-v28';
+const CACHE_NAME = 'itemdb-cache-v40';
 const ASSETS_TO_CACHE = [
   './',
   './style.css',
@@ -16,7 +16,8 @@ const ASSETS_TO_CACHE = [
   './js/audio.js',
   './js/ui.js',
   './js/barcode.js',
-  './js/jev.js'
+  './js/jev.js',
+  './js/gemini.js'
 ];
 
 /**
@@ -53,6 +54,12 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+self.addEventListener('message', (event) => {
+  if (event.data === 'skipWaiting') {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener('fetch', (event) => {
   // Notion APIや外部CDNのリクエストはネットワーク優先
   if (event.request.url.includes('api.notion.com') ||
@@ -62,21 +69,28 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // ナビゲーションリクエスト（HTMLページのトップレベル表示）
+  // ナビゲーションリクエスト（HTMLページのトップレベル表示）: Network-First（オンライン時は最新取得、オフライン時はキャッシュ）
   if (event.request.mode === 'navigate') {
     event.respondWith(
-      caches.match('./').then((cachedResponse) => {
-        if (cachedResponse) {
-          return cleanResponse(cachedResponse);
+      fetch(event.request).then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          const responseToCache = cleanResponse(networkResponse.clone());
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put('./', responseToCache);
+          });
         }
-        return fetch(event.request).then((networkResponse) => {
-          return cleanResponse(networkResponse);
-        }).catch(() => caches.match('./').then(cleanResponse));
+        return cleanResponse(networkResponse);
+      }).catch(() => {
+        return caches.match('./').then((cachedResponse) => {
+          if (cachedResponse) return cleanResponse(cachedResponse);
+          return caches.match('./index.html').then(cleanResponse);
+        });
       })
     );
     return;
   }
 
+  // 通常のアセットリクエスト
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
@@ -93,7 +107,7 @@ self.addEventListener('fetch', (event) => {
       }
 
       return fetch(event.request).then((networkResponse) => {
-        if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
+        if (!networkResponse || networkResponse.status !== 200 || (networkResponse.type !== 'basic' && networkResponse.type !== 'cors')) {
           return cleanResponse(networkResponse);
         }
         const responseToCache = cleanResponse(networkResponse.clone());

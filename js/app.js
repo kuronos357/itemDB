@@ -48,7 +48,10 @@ class Application {
 
     // 5. Service Worker登録 (PWA)
     if ('serviceWorker' in navigator && window.location.protocol === 'https:') {
-      navigator.serviceWorker.register('./sw.js').catch(err => {
+      navigator.serviceWorker.register('./sw.js').then((reg) => {
+        // 起動時に最新のService Workerがあるか即座に確認
+        reg.update().catch(() => {});
+      }).catch(err => {
         console.warn('[PWA] Service Worker registration failed:', err);
       });
     }
@@ -143,6 +146,24 @@ class Application {
 
     document.getElementById('btn-copy-setup-url')?.addEventListener('click', () => {
       this._copySetupUrl();
+    });
+
+    document.getElementById('btn-force-reload-cache')?.addEventListener('click', async () => {
+      if (confirm('アプリのキャッシュとService Workerを削除し、最新バージョンを強制取得しますか？\n（Notion設定などの保存データは消去されません）')) {
+        try {
+          if ('serviceWorker' in navigator) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            for (const r of regs) await r.unregister();
+          }
+          if ('caches' in window) {
+            const keys = await caches.keys();
+            for (const k of keys) await caches.delete(k);
+          }
+        } catch (e) {
+          console.warn('Cache clear error:', e);
+        }
+        window.location.href = window.location.origin + window.location.pathname + '?_v=' + Date.now();
+      }
     });
 
     // 動的コンテンツ内のクリックイベント委譲
