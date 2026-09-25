@@ -576,7 +576,11 @@ class Application {
    * バーコード（JAN/ISBN）スキャン時のハンドラ
    */
   async onBarcodeScanned(code) {
+    if (this._isBarcodeProcessing) return;
+    this._isBarcodeProcessing = true;
+
     if (!state.isConfigured()) {
+      this._isBarcodeProcessing = false;
       ui.showToast('Notionの設定を先に行ってください', 'warning');
       ui.renderSettingsModal();
       return;
@@ -616,6 +620,8 @@ class Application {
       ui.setLoading(false);
       ui.showToast(`バーコード検索エラー: ${err.message}`, 'error');
       feedback.playError();
+    } finally {
+      this._isBarcodeProcessing = false;
     }
   }
 
@@ -674,7 +680,8 @@ class Application {
         details: formData.details,
         attributes: finalAttributes,
         isAutoRegistered: true,
-        coverUrl: formData.coverUrl
+        coverUrl: formData.coverUrl,
+        code: formData.code
       });
 
       feedback.playSuccess();
@@ -1039,6 +1046,11 @@ class Application {
       statusEl.className = 'status-text text-warning';
       return;
     }
+
+    // 入力された Client ID を即座に保存
+    state.config.yahooAppId = yahooAppId;
+    state.saveConfig(state.config);
+    ui._updateSyncBadges();
 
     btn.disabled = true;
     statusEl.textContent = 'Yahoo! API 接続テスト中 (コクヨ ドットライナー: 4901480151830 で検索)...';

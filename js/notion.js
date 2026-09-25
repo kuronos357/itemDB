@@ -548,13 +548,19 @@ export class NotionClient {
 
       if (normTitle.includes('notion') || normTitle.includes('トークン') || normTitle.includes('secret')) {
         // Notion APIトークンはセキュリティおよび設計上、Notionテーブルから同期しない（端末内のみで安全に管理）
-      } else if (normTitle.includes('物品') || normTitle.includes('item')) {
-        updates.itemDbId = value.replace(/[-\s]/g, '');
-        updatedKeys.push('物品DB ID');
-      } else if (normTitle.includes('場所') || normTitle.includes('location')) {
-        updates.locationDbId = value.replace(/[-\s]/g, '');
-        updatedKeys.push('場所DB ID');
-      } else if (normTitle.includes('yahoo') || normTitle.includes('appid') || normTitle.includes('ヤフー')) {
+      } else if (normTitle.includes('物品db') || normTitle.includes('itemdb') || (normTitle.includes('物品') && (value.includes('notion.so') || /^[0-9a-f\-]{32,36}$/i.test(value)))) {
+        const extracted = NotionClient.extractDatabaseId(value);
+        if (extracted && /^[0-9a-f]{32}$/i.test(extracted)) {
+          updates.itemDbId = extracted;
+          updatedKeys.push('物品DB ID');
+        }
+      } else if (normTitle.includes('場所db') || normTitle.includes('locationdb') || (normTitle.includes('場所') && (value.includes('notion.so') || /^[0-9a-f\-]{32,36}$/i.test(value)))) {
+        const extracted = NotionClient.extractDatabaseId(value);
+        if (extracted && /^[0-9a-f]{32}$/i.test(extracted)) {
+          updates.locationDbId = extracted;
+          updatedKeys.push('場所DB ID');
+        }
+      } else if (normTitle.includes('yahoo') || normTitle.includes('appid') || normTitle.includes('ヤフー') || normTitle.includes('client') || normTitle.includes('クライアント')) {
         updates.yahooAppId = value;
         updatedKeys.push('Yahoo Client ID');
       } else if (normTitle.includes('jev最大') || normTitle.includes('jevmax') || normTitle.includes('最大件数')) {
@@ -1201,11 +1207,24 @@ export class NotionClient {
     details = '',
     attributes = [],
     isAutoRegistered = false,
-    coverUrl = null
+    coverUrl = null,
+    code = null
   }) {
-    const targetDbId = isItem
+    let targetDbId = isItem
       ? (state.config.itemDbId || state.config.dbId)
       : (state.config.locationDbId || state.config.dbId);
+
+    // IDの検証・自己修復: もし targetDbId が32桁16進数でなければ、親DB (dbId) から再解決
+    const cleanCheck = String(targetDbId || '').replace(/-/g, '');
+    if (!/^[0-9a-f]{32}$/i.test(cleanCheck) && state.config.dbId) {
+      console.warn('[NotionClient] Invalid targetDbId detected, repairing via resolveDatabases...');
+      try {
+        const resolved = await this.resolveDatabases(state.config.dbId);
+        targetDbId = isItem ? resolved.itemDb.id : resolved.locationDb.id;
+      } catch {
+        targetDbId = NotionClient.extractDatabaseId(state.config.dbId) || targetDbId;
+      }
+    }
 
     if (!targetDbId) throw new Error('作成先データベースが未設定です。');
 
@@ -1331,6 +1350,30 @@ export class NotionClient {
       properties['アクティブ'] = { checkbox: true };
     }
 
+    // 9. JANコード / バーコード プロパティが存在する場合は自動設定
+    if (code) {
+      const barcodeStr = String(code).trim();
+      const foundBarcodeProp = props['JANコード']
+        || props['JAN']
+        || props['バーコード']
+        || props['barcode']
+        || props['Barcode']
+        || props['ISBN']
+        || Object.values(props).find(p => ['janコード', 'jan', 'バーコード', 'barcode', 'isbn'].includes(p.name.toLowerCase()));
+      if (foundBarcodeProp && foundBarcodeProp.type !== 'title') {
+        if (foundBarcodeProp.type === 'rich_text') {
+          properties[foundBarcodeProp.name] = { rich_text: [{ text: { content: barcodeStr } }] };
+        } else if (foundBarcodeProp.type === 'number') {
+          const num = Number(barcodeStr.replace(/\D/g, ''));
+          if (!isNaN(num)) {
+            properties[foundBarcodeProp.name] = { number: num };
+          }
+        } else if (foundBarcodeProp.type === 'phone_number') {
+          properties[foundBarcodeProp.name] = { phone_number: barcodeStr };
+        }
+      }
+    }
+
     // カバー画像 URL の検証（http/httpsで始まる有効なURL文字列のみセット）
     const validCoverUrl = (typeof coverUrl === 'string' && /^https?:\/\/.+/i.test(coverUrl.trim()))
       ? coverUrl.trim()
@@ -1439,6 +1482,9 @@ export class NotionClient {
       }
     }
 
+    if (!res) {
+      throw new Error('Notionデータベースへのアイテム登録に失敗しました。Notionのアクセス権限またはプロパティ設定をご確認ください。');
+    }
     return this._normalizeRecord(res);
   }
 

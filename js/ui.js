@@ -1000,6 +1000,16 @@ class UIManager {
     if (attrInput) attrInput.value = initialAttrs.join(', ');
     if (detailsInput) detailsInput.value = initialDetails;
 
+    const attrHintEl = document.getElementById('barcode-attr-hint');
+    if (attrHintEl) {
+      if (!initialTitle) {
+        const reason = itemData.message ? ` (${itemData.message})` : '';
+        attrHintEl.innerHTML = `<span style="color: var(--color-warning);">⚠️ 商品情報が見つかりませんでした${reason}。品名を手入力できます。</span>`;
+      } else {
+        attrHintEl.textContent = itemData.isIsbn ? 'ISBNは「本」、JANはAI判定または「市販品」が自動設定されます。' : 'JANはAI判定または「市販品」が自動設定されます。';
+      }
+    }
+
     // 登録ボタンのハンドラ配線
     const submitBtn = document.getElementById('btn-submit-barcode');
     if (submitBtn) {

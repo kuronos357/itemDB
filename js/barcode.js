@@ -9,6 +9,9 @@
 import { JevService } from './jev.js';
 import { GeminiService } from './gemini.js';
 
+// クライアント側インメモリキャッシュ (同一バーコードの再読取ブレを完全に防止)
+const CLIENT_JAN_CACHE = new Map();
+
 export class BarcodeService {
   /**
    * スキャン文字列がバーコード（JAN/ISBN）かどうか判定
@@ -58,27 +61,23 @@ export class BarcodeService {
 
   /**
    * バーコードから商品・書籍情報を検索
-   * @param {string} rawCode
-   * @param {{ jevApiKey?: string, candidateAttributes?: string[], jevMaxAttributes?: number, yahooAppId?: string, geminiApiKey?: string, existingRecord?: any }} [options]
-   * @returns {Promise<{
-   *   code: string,
-   *   isIsbn: boolean,
-   *   title: string,
-   *   author?: string,
-   *   publisher?: string,
-   *   coverUrl?: string,
-   *   details: string,
-   *   attributes: string[]
-   * }>}
    */
   static async lookup(rawCode, options = {}) {
     const code = String(rawCode).replace(/[-\s]/g, '').trim();
+
+    // キャッシュ確認 (取得済みの商品は即座に100%確実に返却)
+    const cached = CLIENT_JAN_CACHE.get(code);
+    if (cached) {
+      return JSON.parse(JSON.stringify(cached));
+    }
+
     const isBook = this.isIsbn(code);
 
+    let result = null;
     if (isBook) {
-      return await this._lookupIsbn(code);
+      result = await this._lookupIsbn(code);
     } else {
-      const result = await this._lookupJan(code, options);
+      result = await this._lookupJan(code, options);
       const candidateAttrs = Array.isArray(options.candidateAttributes) ? options.candidateAttributes : [];
 
       // 1. Gemini による商品名スマート要約（長文SEOタイトルの場合またはGemini有効時）
@@ -129,6 +128,10 @@ export class BarcodeService {
         result.attributes = classifiedAttrs;
       } else if (!result.attributes || result.attributes.length === 0) {
         result.attributes = candidateAttrs.includes('市販品') ? ['市販品'] : [];
+      }
+
+      if (result && result.title) {
+        CLIENT_JAN_CACHE.set(code, JSON.parse(JSON.stringify(result)));
       }
 
       return result;
@@ -232,6 +235,7 @@ export class BarcodeService {
       const isLocal = (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'));
       const janEndpoint = isLocal ? 'https://itemdb.pages.dev/api/jan' : '/api/jan';
 
+      let apiMessage = '';
       const queryParams = new URLSearchParams({ code: jan });
       if (options.yahooAppId) {
         queryParams.set('appid', options.yahooAppId);
@@ -263,6 +267,9 @@ export class BarcodeService {
             details: detailLines.join('\n'),
             attributes: attrs
           };
+        } else {
+          apiMessage = data.message || '';
+          console.warn('[BarcodeService] /api/jan response:', data.message);
         }
       }
     } catch (e) {
@@ -366,7 +373,8 @@ export class BarcodeService {
       publisher: '',
       coverUrl: null,
       details: `JAN: ${jan}`,
-      attributes: ['市販品']
+      attributes: ['市販品'],
+      message: apiMessage
     };
   }
 }
