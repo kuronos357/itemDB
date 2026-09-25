@@ -577,15 +577,22 @@ class UIManager {
 
     const detectedEl = document.getElementById('detected-db-id');
     if (detectedEl) {
-      const { itemDbId, locationDbId, itemDbTitle, locationDbTitle, dbId: rawDbId } = state.config;
+      const { itemDbId, locationDbId, configDbId, itemDbTitle, locationDbTitle, configDbTitle, dbId: rawDbId } = state.config;
       if (itemDbId && locationDbId && itemDbId !== locationDbId) {
-        detectedEl.innerHTML = `✓ 連携中: <b>物品DB</b>「${itemDbTitle || itemDbId.slice(0, 8)}」⇄ <b>場所DB</b>「${locationDbTitle || locationDbId.slice(0, 8)}」`;
+        let msg = `✓ 連携中: <b>物品DB</b>「${itemDbTitle || itemDbId.slice(0, 8)}」⇄ <b>場所DB</b>「${locationDbTitle || locationDbId.slice(0, 8)}」`;
+        if (configDbId) {
+          msg += `<br>✓ <b>設定テーブル</b>「${configDbTitle || '設定'}」も検出済み`;
+        }
+        detectedEl.innerHTML = msg;
       } else if (itemDbId || rawDbId) {
         detectedEl.innerHTML = `✓ 接続中のID: <code>${itemDbId || rawDbId}</code>`;
       } else {
         detectedEl.textContent = '物品DBまたは場所DBのURLを貼り付けると、リレーションからもう片方のDBも自動判別・連携されます。';
       }
     }
+
+    const syncStatusEl = document.getElementById('notion-sync-status-msg');
+    if (syncStatusEl) syncStatusEl.textContent = '';
 
     modal.classList.remove('hidden');
   }

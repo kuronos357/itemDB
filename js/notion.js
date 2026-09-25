@@ -238,13 +238,15 @@ export class NotionClient {
 
     let itemDbInfo = null;
     let locationDbInfo = null;
+    let configDbInfo = null;
 
     // パターンA: 2025-09-03 の複数データソース (マルチデータソースDB)
-    // 1つのデータベースコンテナに複数のデータソース（物品、場所など）が含まれている場合
+    // 1つのデータベースコンテナに複数のデータソース（物品、場所、設定など）が含まれている場合
     if (dbData.data_sources && dbData.data_sources.length >= 2) {
       const dsList = dbData.data_sources;
       let itemDs = null;
       let locDs = null;
+      let configDs = null;
 
       // 1. 各データソースのプロパティ構造による高精度判定
       for (const ds of dsList) {
@@ -260,21 +262,28 @@ export class NotionClient {
           if (props['物理アドレス'] || props['現在地']) {
             itemDs = ds;
           }
+          // 「サービス名」や「設定」を持つ、または設定/config/apiを含むのは設定データソース
+          if ((props['サービス名'] && props['設定']) || /設定|config|settings|env|api/i.test(ds.name)) {
+            configDs = ds;
+          }
         } catch {}
       }
 
-      // 2. 名前による判定（目録/物品 vs 物理アドレス/場所）
-      if (!itemDs || !locDs) {
+      // 2. 名前による判定（目録/物品 vs 物理アドレス/場所 vs 設定）
+      if (!itemDs || !locDs || !configDs) {
         if (!itemDs) {
-          // 「物理アドレス」に「物」が含まれるため「目録」や「物品」などを優先一致
           itemDs = dsList.find(ds => /^(目録|物品|アイテム|品名|ツール|tools?|items?|catalog)$/i.test(ds.name))
                 || dsList.find(ds => /目録|アイテム|item|ツール|パーツ|品名/i.test(ds.name))
-                || (locDs ? dsList.find(ds => ds.id !== locDs.id) : null);
+                || (locDs ? dsList.find(ds => ds.id !== locDs.id && ds.id !== configDs?.id) : null);
         }
         if (!locDs) {
           locDs = dsList.find(ds => /^(物理アドレス|アドレス|場所|位置|ロケーション|棚|収納)$/i.test(ds.name))
                || dsList.find(ds => /物理アドレス|アドレス|場所|位置|収納|棚|部屋|ボックス|box|保管/i.test(ds.name))
-               || (itemDs ? dsList.find(ds => ds.id !== itemDs.id) : null);
+               || (itemDs ? dsList.find(ds => ds.id !== itemDs.id && ds.id !== configDs?.id) : null);
+        }
+        if (!configDs) {
+          configDs = dsList.find(ds => /設定|config|settings|api|環境変数/i.test(ds.name))
+                  || (itemDs && locDs ? dsList.find(ds => ds.id !== itemDs.id && ds.id !== locDs.id) : null);
         }
       }
 
@@ -282,21 +291,29 @@ export class NotionClient {
       if (!itemDs && !locDs) {
         itemDs = dsList[0];
         locDs = dsList[1];
+        if (dsList.length > 2) configDs = dsList[2];
       } else if (!itemDs) {
-        itemDs = dsList.find(ds => ds.id !== locDs.id) || dsList[0];
+        itemDs = dsList.find(ds => ds.id !== locDs.id && ds.id !== configDs?.id) || dsList[0];
       } else if (!locDs) {
-        locDs = dsList.find(ds => ds.id !== itemDs.id) || dsList[1];
+        locDs = dsList.find(ds => ds.id !== itemDs.id && ds.id !== configDs?.id) || dsList[1];
       }
 
       const cleanItemDsId = itemDs.id.replace(/-/g, '');
       const cleanLocDsId = locDs.id.replace(/-/g, '');
+      const cleanConfigDsId = configDs ? configDs.id.replace(/-/g, '') : null;
 
       // 各データソースのスキーマを取得
       await this.getDatabaseSchema(cleanItemDsId).catch(() => {});
       await this.getDatabaseSchema(cleanLocDsId).catch(() => {});
+      if (cleanConfigDsId) {
+        await this.getDatabaseSchema(cleanConfigDsId).catch(() => {});
+      }
 
       itemDbInfo = { id: cleanItemDsId, title: itemDs.name || '物品' };
       locationDbInfo = { id: cleanLocDsId, title: locDs.name || '場所' };
+      if (configDs && cleanConfigDsId) {
+        configDbInfo = { id: cleanConfigDsId, title: configDs.name || '設定' };
+      }
     }
     // パターンB: データソースが1つの場合、またはリレーションで別DBと接続している場合
     else {
@@ -392,39 +409,54 @@ export class NotionClient {
     }
 
     // stateに保存
-    state.saveConfig({
+    const configUpdates = {
       dbId: cleanTargetId,
       itemDbId: itemDbInfo.id,
       locationDbId: locationDbInfo.id,
       itemDbTitle: itemDbInfo.title,
       locationDbTitle: locationDbInfo.title,
       propMapping: detectedMapping
-    });
+    };
+    if (configDbInfo) {
+      configUpdates.configDbId = configDbInfo.id;
+      configUpdates.configDbTitle = configDbInfo.title;
+    }
+    state.saveConfig(configUpdates);
 
     return {
       itemDb: itemDbInfo,
       locationDb: locationDbInfo,
+      configDb: configDbInfo,
       isDual: itemDbInfo.id !== locationDbInfo.id
     };
   }
 
   /**
-   * データベース疎通テスト（2つのDBの連携状況を診断）
+   * データベース疎通テスト（2つのDBおよび設定DBの連携状況を診断）
    */
   async testConnection() {
     const itemDbId = state.config.itemDbId;
     const locationDbId = state.config.locationDbId;
+    const configDbId = state.config.configDbId;
     const rawInput = state.config.dbId || itemDbId || locationDbId;
     if (!rawInput) throw new Error('データベースのURLまたはIDが設定されていません。');
 
-    // すでに物品DBと場所DB（データソースID）の両方が設定されている場合は直接両方のスキーマを取得して確認
+    // すでに物品DBと場所DB（データソースID）の両方が設定されている場合は直接スキーマを取得して確認
     if (itemDbId && locationDbId && itemDbId !== locationDbId) {
       try {
         const itemSchema = await this.getDatabaseSchema(itemDbId);
         const locSchema = await this.getDatabaseSchema(locationDbId);
+        let configDbResult = null;
+        if (configDbId) {
+          try {
+            const cfgSchema = await this.getDatabaseSchema(configDbId);
+            configDbResult = { id: configDbId, title: cfgSchema.title || '設定' };
+          } catch {}
+        }
         return {
           itemDb: { id: itemDbId, title: itemSchema.title || '物品' },
           locationDb: { id: locationDbId, title: locSchema.title || '場所' },
+          configDb: configDbResult,
           isDual: true
         };
       } catch (err) {
@@ -433,6 +465,223 @@ export class NotionClient {
     }
 
     return await this.resolveDatabases(rawInput);
+  }
+
+  /**
+   * Notionの設定データソース（または設定DB）からAPIキー等の設定を読み込み
+   * @param {string} [customConfigDbId]
+   * @returns {Promise<{ count: number, updatedKeys: string[], config: object }>}
+   */
+  async loadConfigFromNotion(customConfigDbId = null) {
+    let targetConfigId = customConfigDbId || state.config.configDbId;
+
+    // 設定DB IDが未設定の場合、親DBから自動解決
+    if (!targetConfigId && (state.config.dbId || state.config.itemDbId)) {
+      try {
+        const resolved = await this.resolveDatabases(state.config.dbId || state.config.itemDbId);
+        targetConfigId = resolved.configDb?.id || state.config.configDbId;
+      } catch (e) {
+        console.warn('[NotionClient] resolveDatabases failed during config load:', e);
+      }
+    }
+
+    if (!targetConfigId) {
+      throw new Error('設定用データベースが見つかりません。Notionの親データベースURLを入力してください。');
+    }
+
+    const cleanId = NotionClient.extractDatabaseId(targetConfigId);
+
+    // クエリ実行 (全件取得)
+    let res = null;
+    try {
+      res = await this._request(`data_sources/${cleanId}/query`, {
+        method: 'POST',
+        body: JSON.stringify({ page_size: 100 })
+      });
+    } catch (err) {
+      if (err.status === 404 || err.message?.includes('404')) {
+        res = await this._request(`databases/${cleanId}/query`, {
+          method: 'POST',
+          body: JSON.stringify({ page_size: 100 })
+        });
+      } else {
+        throw err;
+      }
+    }
+
+    const pages = res?.results || [];
+    if (pages.length === 0) {
+      return { count: 0, updatedKeys: [], config: {} };
+    }
+
+    const updates = {};
+    const updatedKeys = [];
+
+    for (const page of pages) {
+      const props = page.properties || {};
+
+      // タイトル（サービス名）の取得
+      let title = '';
+      for (const p of Object.values(props)) {
+        if (p.type === 'title') {
+          title = p.title?.map(t => t.plain_text).join('').trim() || '';
+          break;
+        }
+      }
+
+      // 設定値の取得 (rich_text, url, number, etc.)
+      let value = '';
+      const configProp = props['設定'] || Object.values(props).find(p => p.type === 'rich_text' || p.type === 'url');
+      if (configProp) {
+        if (configProp.type === 'rich_text') {
+          value = configProp.rich_text?.map(t => t.plain_text).join('').trim() || '';
+        } else if (configProp.type === 'url') {
+          value = configProp.url || '';
+        } else if (configProp.type === 'number') {
+          value = configProp.number != null ? String(configProp.number) : '';
+        }
+      }
+
+      if (!title || !value) continue;
+
+      const normTitle = title.toLowerCase().replace(/[\s\-_（）\(\)]/g, '');
+
+      if (normTitle.includes('notion') || normTitle.includes('トークン') || normTitle.includes('secret')) {
+        updates.apiKey = value;
+        updatedKeys.push('Notion API');
+      } else if (normTitle.includes('物品') || normTitle.includes('item')) {
+        updates.itemDbId = value.replace(/[-\s]/g, '');
+        updatedKeys.push('物品DB ID');
+      } else if (normTitle.includes('場所') || normTitle.includes('location')) {
+        updates.locationDbId = value.replace(/[-\s]/g, '');
+        updatedKeys.push('場所DB ID');
+      } else if (normTitle.includes('yahoo') || normTitle.includes('appid') || normTitle.includes('ヤフー')) {
+        updates.yahooAppId = value;
+        updatedKeys.push('Yahoo Client ID');
+      } else if (normTitle.includes('jev最大') || normTitle.includes('jevmax') || normTitle.includes('最大件数')) {
+        const n = parseInt(value, 10);
+        if (!isNaN(n) && n > 0) {
+          updates.jevMaxAttributes = n;
+          updatedKeys.push('Jev最大件数');
+        }
+      } else if (normTitle.includes('jev')) {
+        updates.jevApiKey = value;
+        updatedKeys.push('Jev APIキー');
+      } else if (normTitle.includes('gemini') || normTitle.includes('ジェミニ')) {
+        updates.geminiApiKey = value;
+        updatedKeys.push('Gemini APIキー');
+      }
+    }
+
+    if (Object.keys(updates).length > 0) {
+      state.saveConfig(updates);
+    }
+
+    return {
+      count: updatedKeys.length,
+      updatedKeys,
+      config: updates
+    };
+  }
+
+  /**
+   * 現在の設定をNotionの設定テーブルに書き込み・同期
+   * @param {object} configData
+   * @param {string} [customConfigDbId]
+   */
+  async saveConfigToNotion(configData, customConfigDbId = null) {
+    let targetConfigId = customConfigDbId || state.config.configDbId;
+
+    if (!targetConfigId && (state.config.dbId || state.config.itemDbId)) {
+      try {
+        const resolved = await this.resolveDatabases(state.config.dbId || state.config.itemDbId);
+        targetConfigId = resolved.configDb?.id || state.config.configDbId;
+      } catch (e) {
+        console.warn('[NotionClient] resolveDatabases failed during config save:', e);
+      }
+    }
+
+    if (!targetConfigId) {
+      throw new Error('設定用データベースが見つかりません。');
+    }
+
+    const cleanId = NotionClient.extractDatabaseId(targetConfigId);
+
+    // 既存ページをクエリ
+    let res = null;
+    try {
+      res = await this._request(`data_sources/${cleanId}/query`, {
+        method: 'POST',
+        body: JSON.stringify({ page_size: 100 })
+      });
+    } catch (err) {
+      if (err.status === 404 || err.message?.includes('404')) {
+        res = await this._request(`databases/${cleanId}/query`, {
+          method: 'POST',
+          body: JSON.stringify({ page_size: 100 })
+        });
+      } else {
+        throw err;
+      }
+    }
+
+    const existingPages = res?.results || [];
+
+    const itemMap = [
+      { key: 'apiKey', title: 'NotionAPI', val: configData.apiKey },
+      { key: 'itemDbId', title: '物品DBID', val: configData.itemDbId },
+      { key: 'locationDbId', title: '場所DBID', val: configData.locationDbId },
+      { key: 'yahooAppId', title: 'Yahoo商品検索（v3）API', val: configData.yahooAppId },
+      { key: 'jevApiKey', title: 'JevAPI', val: configData.jevApiKey },
+      { key: 'jevMaxAttributes', title: 'Jev最大件数', val: configData.jevMaxAttributes != null ? String(configData.jevMaxAttributes) : '3' },
+      { key: 'geminiApiKey', title: 'GeminiAPI', val: configData.geminiApiKey }
+    ];
+
+    let savedCount = 0;
+
+    for (const item of itemMap) {
+      if (item.val === undefined || item.val === null) continue;
+
+      const normKey = item.title.toLowerCase().replace(/[\s\-_（）\(\)]/g, '');
+      const matchedPage = existingPages.find(p => {
+        const titleProp = Object.values(p.properties || {}).find(prop => prop.type === 'title');
+        const t = titleProp?.title?.map(x => x.plain_text).join('').trim() || '';
+        const normT = t.toLowerCase().replace(/[\s\-_（）\(\)]/g, '');
+        return normT.includes(normKey) || normKey.includes(normT);
+      });
+
+      if (matchedPage) {
+        await this._request(`pages/${matchedPage.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            properties: {
+              '設定': {
+                rich_text: [{ text: { content: String(item.val) } }]
+              }
+            }
+          })
+        });
+        savedCount++;
+      } else {
+        await this._request(`pages`, {
+          method: 'POST',
+          body: JSON.stringify({
+            parent: { type: 'data_source_id', data_source_id: cleanId },
+            properties: {
+              'サービス名': {
+                title: [{ text: { content: item.title } }]
+              },
+              '設定': {
+                rich_text: [{ text: { content: String(item.val) } }]
+              }
+            }
+          })
+        });
+        savedCount++;
+      }
+    }
+
+    return savedCount;
   }
 
   /**

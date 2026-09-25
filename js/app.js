@@ -26,7 +26,10 @@ class Application {
     // 1. 設定の自己修復（逆転IDや旧プロパティ名などの補正）
     state.autoHealConfig();
     if (state.isConfigured() && state.config.dbId) {
-      notion.resolveDatabases(state.config.dbId).catch(() => {});
+      notion.resolveDatabases(state.config.dbId).then(() => {
+        // 設定データソースから最新キーを自動同期
+        notion.loadConfigFromNotion().catch(() => {});
+      }).catch(() => {});
     }
 
     ui.init();
@@ -106,6 +109,15 @@ class Application {
 
     document.getElementById('btn-test-gemini')?.addEventListener('click', () => {
       this._testGeminiConnection();
+    });
+
+    // Notion側設定テーブルとの同期ボタン
+    document.getElementById('btn-sync-load-notion')?.addEventListener('click', () => {
+      this._loadSettingsFromNotion();
+    });
+
+    document.getElementById('btn-sync-save-notion')?.addEventListener('click', () => {
+      this._saveSettingsToNotion();
     });
 
     // データベースURL/ID入力時のリアルタイム抽出表示
@@ -958,9 +970,17 @@ class Application {
     try {
       const info = await notion.testConnection();
       if (info.isDual) {
-        statusEl.innerHTML = `✓ 接続成功！<br><b>物品DB</b>: 「${info.itemDb.title}」<br><b>場所DB</b>: 「${info.locationDb.title}」 (リレーション自動連携)`;
+        let msg = `✓ 接続成功！<br><b>物品DB</b>: 「${info.itemDb.title}」<br><b>場所DB</b>: 「${info.locationDb.title}」 (リレーション自動連携)`;
+        if (info.configDb) {
+          msg += `<br><b>設定テーブル</b>: 「${info.configDb.title}」 (APIキー連携可能)`;
+        }
+        statusEl.innerHTML = msg;
       } else {
-        statusEl.textContent = `✓ 接続成功: データベース「${info.itemDb.title}」を確認しました。`;
+        let msg = `✓ 接続成功: データベース「${info.itemDb.title}」を確認しました。`;
+        if (info.configDb) {
+          msg += `<br><b>設定テーブル</b>: 「${info.configDb.title}」 (APIキー連携可能)`;
+        }
+        statusEl.innerHTML = msg;
       }
       statusEl.className = 'status-text text-success';
       feedback.playSuccess();
@@ -968,7 +988,11 @@ class Application {
       const detectedEl = document.getElementById('detected-db-id');
       if (detectedEl) {
         if (info.isDual) {
-          detectedEl.innerHTML = `✓ 物品DB: <code>${info.itemDb.id}</code><br>✓ 場所DB: <code>${info.locationDb.id}</code>`;
+          let detMsg = `✓ 物品DB: <code>${info.itemDb.id}</code><br>✓ 場所DB: <code>${info.locationDb.id}</code>`;
+          if (info.configDb) {
+            detMsg += `<br>✓ 設定DB: <code>${info.configDb.id}</code>`;
+          }
+          detectedEl.innerHTML = detMsg;
         } else {
           detectedEl.innerHTML = `✓ 接続中のID: <code>${info.itemDb.id}</code>`;
         }
@@ -1101,6 +1125,118 @@ class Application {
       statusEl.textContent = `✕ エラー: ${e.message}`;
       statusEl.className = 'status-text text-danger';
       feedback.playError();
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  /**
+   * Notion側「設定」テーブルから最新の設定を読み込んでフォームに反映
+   */
+  async _loadSettingsFromNotion() {
+    const btn = document.getElementById('btn-sync-load-notion');
+    const statusEl = document.getElementById('notion-sync-status-msg');
+    if (!btn) return;
+
+    btn.disabled = true;
+    if (statusEl) {
+      statusEl.textContent = 'Notionの設定テーブルから読込中...';
+      statusEl.className = 'status-text text-muted';
+    }
+
+    try {
+      const curApi = document.getElementById('input-api-key')?.value.trim();
+      const curDb = document.getElementById('input-db-id')?.value.trim();
+      if (curApi) state.config.apiKey = curApi;
+      if (curDb) state.config.dbId = curDb;
+
+      const res = await notion.loadConfigFromNotion();
+      if (res.count > 0) {
+        ui.renderSettingsModal();
+        feedback.playSuccess();
+        const msg = `✓ Notionから${res.count}件の設定を同期しました (${res.updatedKeys.join(', ')})`;
+        if (statusEl) {
+          statusEl.textContent = msg;
+          statusEl.className = 'status-text text-success';
+        }
+        ui.showToast(`Notionから${res.count}件の設定を読み込みました！`, 'success');
+      } else {
+        feedback.playScan();
+        const msg = 'ℹ 設定テーブルは見つかりましたが、まだ値が入力されていません。';
+        if (statusEl) {
+          statusEl.textContent = msg;
+          statusEl.className = 'status-text text-warning';
+        }
+        ui.showToast('設定テーブルに値がありませんでした', 'info');
+      }
+    } catch (err) {
+      feedback.playError();
+      const msg = `✕ 読込失敗: ${err.message}`;
+      if (statusEl) {
+        statusEl.textContent = msg;
+        statusEl.className = 'status-text text-danger';
+      }
+      ui.showToast(`Notion同期失敗: ${err.message}`, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  /**
+   * 現在の入力設定をNotion側「設定」テーブルに書き出して保存
+   */
+  async _saveSettingsToNotion() {
+    const btn = document.getElementById('btn-sync-save-notion');
+    const statusEl = document.getElementById('notion-sync-status-msg');
+    if (!btn) return;
+
+    const apiKey = document.getElementById('input-api-key')?.value.trim();
+    const dbId = document.getElementById('input-db-id')?.value.trim();
+    const yahooAppId = document.getElementById('input-yahoo-app-id')?.value.trim();
+    const jevApiKey = document.getElementById('input-jev-api-key')?.value.trim();
+    const jevMaxRaw = document.getElementById('input-jev-max-attributes')?.value;
+    const jevMaxAttributes = jevMaxRaw ? Math.max(1, parseInt(jevMaxRaw, 10) || 3) : 3;
+    const geminiApiKey = document.getElementById('input-gemini-api-key')?.value.trim();
+
+    if (!apiKey || !dbId) {
+      ui.showToast('Notion APIキーとデータベースIDを入力してください', 'warning');
+      return;
+    }
+
+    btn.disabled = true;
+    if (statusEl) {
+      statusEl.textContent = 'Notionの設定テーブルへ書出中...';
+      statusEl.className = 'status-text text-muted';
+    }
+
+    try {
+      state.saveConfig({ apiKey, dbId, yahooAppId, jevApiKey, jevMaxAttributes, geminiApiKey, proxyMode: 'cloudflare' });
+      const count = await notion.saveConfigToNotion({
+        apiKey,
+        dbId,
+        itemDbId: state.config.itemDbId,
+        locationDbId: state.config.locationDbId,
+        yahooAppId,
+        jevApiKey,
+        jevMaxAttributes,
+        geminiApiKey
+      });
+
+      feedback.playSuccess();
+      const msg = `✓ Notionの設定テーブルに${count}件の設定を書き込みました！`;
+      if (statusEl) {
+        statusEl.textContent = msg;
+        statusEl.className = 'status-text text-success';
+      }
+      ui.showToast('Notionへ設定を保存しました！', 'success');
+    } catch (err) {
+      feedback.playError();
+      const msg = `✕ 書出失敗: ${err.message}`;
+      if (statusEl) {
+        statusEl.textContent = msg;
+        statusEl.className = 'status-text text-danger';
+      }
+      ui.showToast(`Notion保存失敗: ${err.message}`, 'error');
     } finally {
       btn.disabled = false;
     }

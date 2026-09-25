@@ -18,6 +18,7 @@ const STORAGE_KEYS = {
   NOTION_DB_ID: 'itemdb_notion_db_id',
   NOTION_ITEM_DB_ID: 'itemdb_notion_item_db_id',
   NOTION_LOCATION_DB_ID: 'itemdb_notion_location_db_id',
+  NOTION_CONFIG_DB_ID: 'itemdb_notion_config_db_id',
   NOTION_PROXY_MODE: 'itemdb_notion_proxy_mode', // 'auto', 'cloudflare', 'corsproxy', 'direct', 'custom'
   CUSTOM_PROXY_URL: 'itemdb_custom_proxy_url',
   JEV_API_KEY: 'itemdb_jev_api_key',
@@ -45,8 +46,10 @@ class StateStore extends EventTarget {
       dbId: localStorage.getItem(STORAGE_KEYS.NOTION_DB_ID) || '',
       itemDbId: localStorage.getItem(STORAGE_KEYS.NOTION_ITEM_DB_ID) || '',
       locationDbId: localStorage.getItem(STORAGE_KEYS.NOTION_LOCATION_DB_ID) || '',
+      configDbId: localStorage.getItem(STORAGE_KEYS.NOTION_CONFIG_DB_ID) || '',
       itemDbTitle: '',
       locationDbTitle: '',
+      configDbTitle: '',
       proxyMode: localStorage.getItem(STORAGE_KEYS.NOTION_PROXY_MODE) || 'cloudflare',
       customProxyUrl: localStorage.getItem(STORAGE_KEYS.CUSTOM_PROXY_URL) || '',
       jevApiKey: localStorage.getItem(STORAGE_KEYS.JEV_API_KEY) || '',
@@ -148,6 +151,7 @@ class StateStore extends EventTarget {
     if (newConfig.dbId !== undefined) localStorage.setItem(STORAGE_KEYS.NOTION_DB_ID, newConfig.dbId);
     if (newConfig.itemDbId !== undefined) localStorage.setItem(STORAGE_KEYS.NOTION_ITEM_DB_ID, newConfig.itemDbId);
     if (newConfig.locationDbId !== undefined) localStorage.setItem(STORAGE_KEYS.NOTION_LOCATION_DB_ID, newConfig.locationDbId);
+    if (newConfig.configDbId !== undefined) localStorage.setItem(STORAGE_KEYS.NOTION_CONFIG_DB_ID, newConfig.configDbId);
     if (newConfig.proxyMode !== undefined) localStorage.setItem(STORAGE_KEYS.NOTION_PROXY_MODE, newConfig.proxyMode);
     if (newConfig.customProxyUrl !== undefined) localStorage.setItem(STORAGE_KEYS.CUSTOM_PROXY_URL, newConfig.customProxyUrl);
     if (newConfig.jevApiKey !== undefined) localStorage.setItem(STORAGE_KEYS.JEV_API_KEY, newConfig.jevApiKey);
@@ -217,5 +221,5 @@ class StateStore extends EventTarget {
   }
 }
 
-export const APP_VERSION = 'v32';
+export const APP_VERSION = 'v33';
 export const state = new StateStore();

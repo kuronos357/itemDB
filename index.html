@@ -34,7 +34,7 @@
       <div class="logo-section">
         <div style="display: flex; align-items: baseline; gap: 6px;">
           <h1 class="app-title">itemDB</h1>
-          <span class="badge" style="font-size: 0.7rem; padding: 1px 5px; background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 4px; font-weight: 500;">v32</span>
+          <span class="badge" style="font-size: 0.7rem; padding: 1px 5px; background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 4px; font-weight: 500;">v33</span>
         </div>
         <span class="app-subtitle">Logistics & Cache</span>
       </div>
@@ -159,6 +159,22 @@
         <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 8px 0;">
 
         <div class="form-group">
+          <label>Notion側設定テーブルと同期</label>
+          <p class="text-sub">Notion内の「設定」テーブルから各種APIキー・IDを一括同期、または現在の設定をNotionに保存します。</p>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;" class="mt-2">
+            <button id="btn-sync-load-notion" class="btn btn-secondary" style="flex: 1; min-width: 140px;">
+              <span>📥 Notionから設定を読込</span>
+            </button>
+            <button id="btn-sync-save-notion" class="btn btn-secondary" style="flex: 1; min-width: 140px;">
+              <span>📤 Notionへ設定を書出</span>
+            </button>
+          </div>
+          <span id="notion-sync-status-msg" class="status-text mt-1"></span>
+        </div>
+
+        <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 8px 0;">
+
+        <div class="form-group">
           <label>別端末 (スマホ/Apple Watch) 連携</label>
           <p class="text-sub">この端末で保存した設定を他の端末に簡単に引き継ぐことができます。</p>
           <div style="display: flex; gap: 8px; flex-wrap: wrap;" class="mt-2">
@@ -176,7 +192,7 @@
         </div>
       </div>
       <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
-        <span class="text-sub" style="font-size: 0.75rem; color: var(--text-muted);">itemDB Build 32</span>
+        <span class="text-sub" style="font-size: 0.75rem; color: var(--text-muted);">itemDB Build 33</span>
         <button id="btn-save-settings" class="btn btn-primary">設定を保存</button>
       </div>
     </div>
