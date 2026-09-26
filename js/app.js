@@ -679,7 +679,8 @@ class Application {
         attributes: formData.attributes || [],
         isAutoRegistered: true,
         coverUrl: formData.coverUrl,
-        code: formData.code
+        code: formData.code,
+        isActive: false
       });
 
       // 履歴に追加
@@ -705,7 +706,7 @@ class Application {
 
       // 成否の明示的なポップアップ通知 (alert & toast)
       ui.showToast(`✓ Notionに登録完了: 「${record.name}」`, 'success', 5000);
-      alert(`【Notion登録 成功】\n\n「${record.name}」を目録データベースに登録しました！\n\n・管理ID: ${record.id != null ? '#' + record.id : record.pageId.slice(0, 8)}\n・詳細: ${formData.details ? '記載あり' : 'なし'}`);
+      alert(`【Notion登録 成功】\n\n「${record.name}」を目録データベースに登録しました！\n\n・管理ID: ${record.id != null ? '#' + record.id : record.pageId.slice(0, 8)}\n・状態: 非アクティブ\n・詳細: ${formData.details ? '記載あり' : 'なし'}`);
 
       return true;
     } catch (err) {

@@ -1219,7 +1219,8 @@ export class NotionClient {
     attributes = [],
     isAutoRegistered = false,
     coverUrl = null,
-    code = null
+    code = null,
+    isActive = false
   }) {
     // 既知の親DBコンテナIDと子データソースIDマッピング (目録/物理アドレス/セットアップ)
     const KNOWN_PARENT_DB = '3dc5e314fd47802eb00af61c71937780';
@@ -1337,9 +1338,9 @@ export class NotionClient {
       properties['自動登録未確認'] = { checkbox: true };
     }
 
-    // アクティブ (checkbox)
+    // アクティブ (checkbox) - デフォルトは非アクティブ (未チェック)
     if (isItem && props['アクティブ']?.type === 'checkbox') {
-      properties['アクティブ'] = { checkbox: true };
+      properties['アクティブ'] = { checkbox: Boolean(isActive) };
     }
 
     // ※重要: Notionスキーマに実在しない「JAN」「JANコード」「バーコード」等の架空列は送信しません（HTTP 400エラー防止）。コードは「詳細」列に保持されます。
