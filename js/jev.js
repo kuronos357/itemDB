@@ -158,7 +158,104 @@ export class JevService {
   }
 
   /**
-   * Jev API の疎通テストを実行
+   * EC出品タイトルを単語分解し、Jev SystemOne で不要な宣伝・用途キーワードを除外して
+   * スッキリした「メーカー名＋商品名＋型番・仕様」を抽出
+   * 
+   * @param {string} rawTitle ECモールの長文タイトル
+   * @param {string} apiKey Jev APIキー
+   * @returns {Promise<string>} 整形後の商品名
+   */
+  static async cleanProductTitle(rawTitle, apiKey) {
+    if (!rawTitle || !apiKey) return rawTitle || '';
+
+    // 読点、カンマ、括弧類の境界をスペース化してトークン分割
+    const normalized = String(rawTitle)
+      .replace(/[、，,]/g, ' ')
+      .replace(/([【\[［\(（])/g, ' $1')
+      .replace(/([】\]］\)）])/g, '$1 ');
+
+    const tokens = normalized.split(/[\s　]+/).map(t => t.trim()).filter(Boolean);
+
+    // 単語が短すぎる・少なすぎる場合はそのまま返却
+    if (tokens.length <= 2 || rawTitle.length <= 20) {
+      return rawTitle;
+    }
+
+    const questions = {};
+    tokens.forEach((token, idx) => {
+      questions['token_' + idx] = {
+        type: 'choice',
+        instructions: `商品名「${rawTitle}」に含まれる単語「${token}」を、目録・カタログ登録用の正規商品名（ブランド・商品本体名・型番・基本仕様）として残すべきか、用途・互換性・宣伝などの付加情報として除外すべきか判定してください。`,
+        criteria: {
+          '残す': 'メーカー・ブランド名、商品本体の名称（カメラ、洗剤、テープ等）、型番・品番、主要スペック（画素数、容量規格、サイズ、カラー、基本仕様）',
+          '除外': '送料無料、セール、ポイント、個数・まとめ買い・セット数・ケース販売、新品中古状態、配送方法・即日発送、用途キーワード（産業用、ゴルフ等）、対応OSや対応機種・互換環境（Linux, Windows, Raspberry Pi等）、店舗名などの付加情報'
+        }
+      };
+    });
+
+    const payload = {
+      model: 'jev-latest',
+      state: '商品出品タイトル: ' + rawTitle,
+      questions
+    };
+
+    const primaryEndpoint = this._getEndpointUrl();
+
+    try {
+      let res = null;
+      try {
+        res = await fetch(primaryEndpoint, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey.trim()}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        });
+      } catch (netErr) {
+        if (primaryEndpoint !== 'https://itemdb.pages.dev/api/jev') {
+          res = await fetch('https://itemdb.pages.dev/api/jev', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey.trim()}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+          });
+        } else {
+          throw netErr;
+        }
+      }
+
+      if (!res.ok) {
+        console.warn('[JevService] cleanProductTitle HTTP error:', res.status);
+        return rawTitle;
+      }
+
+      const data = await res.json();
+      const answers = data.answers || {};
+
+      const keptTokens = [];
+      tokens.forEach((token, idx) => {
+        const ans = answers['token_' + idx];
+        if (ans?.choice === '残す') {
+          keptTokens.push(token);
+        }
+      });
+
+      if (keptTokens.length === 0) {
+        return rawTitle;
+      }
+
+      return keptTokens.join(' ');
+    } catch (err) {
+      console.warn('[JevService] cleanProductTitle failed:', err);
+      return rawTitle;
+    }
+  }
+
+  /**
+   * Jev API の疎通テストを実行（カテゴリ分類および商品名整形の両方を検証）
    * @param {string} apiKey Jev APIキー
    * @returns {Promise<{ ok: boolean, duration?: number, message: string, details?: any }>}
    */
@@ -169,15 +266,23 @@ export class JevService {
 
     const testPayload = {
       model: 'jev-latest',
-      state: '商品名: シャープペンシル 0.5mm',
+      state: '商品名: コクヨ ドットライナー つめ替え用テープ 8.4mm×16m タ-D400-08N 10個セット [新品]',
       questions: {
         category: {
           type: 'choice',
           instructions: '商品名に最も適合するカテゴリを1つ選択してください。',
           criteria: {
-            '文房具': 'ペン、ノート、文具全般',
+            '文房具': 'ペン、テープ、ノート、文具全般',
             '日用品': '洗剤、生活雑貨、消耗品',
             '書籍': '本、雑誌、コミック'
+          }
+        },
+        clean_check: {
+          type: 'choice',
+          instructions: '単語「[新品]」をカタログ登録用商品名として残すべきか判定してください。',
+          criteria: {
+            '残す': 'ブランド名、商品本体名、型番、基本仕様',
+            '除外': '新品、中古、セール、個数、送料無料などの付加情報'
           }
         }
       }
@@ -207,7 +312,6 @@ export class JevService {
       try {
         reqResult = await doRequest(primaryEndpoint);
       } catch (networkErr) {
-        // もしローカル環境等で /api/jev のネットワークエラーが発生した場合は本番プロキシを試行
         if (primaryEndpoint !== 'https://itemdb.pages.dev/api/jev') {
           usedEndpoint = 'https://itemdb.pages.dev/api/jev';
           reqResult = await doRequest(usedEndpoint);
@@ -221,7 +325,6 @@ export class JevService {
       if (!res.ok) {
         let errorDetail = '';
         if (Array.isArray(data?.detail)) {
-          // FastAPI / Pydantic validation error: [{ loc: [...], msg: "..." }]
           errorDetail = data.detail.map(d => `${d.loc ? d.loc.slice(1).join('.') + ': ' : ''}${d.msg}`).join(', ');
         } else if (data?.detail?.message) {
           errorDetail = data.detail.message;
@@ -250,12 +353,12 @@ export class JevService {
       }
 
       const duration = Math.round(performance.now() - startTime);
-      const categoryAnswer = data?.answers?.category;
+      const cat = data?.answers?.category?.choice || '判定完了';
       return {
         ok: true,
         duration,
-        message: `接続成功 (${duration}ms): 分類AIが正常に応答しました。`,
-        details: { usedEndpoint, answer: categoryAnswer }
+        message: `接続成功 (${duration}ms): Jev AI (分類:「${cat}」/ タイトル単語判定) が正常動作しました。`,
+        details: { usedEndpoint, answers: data?.answers }
       };
     } catch (err) {
       return {

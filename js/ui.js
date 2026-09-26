@@ -570,14 +570,6 @@ class UIManager {
     if (jevMaxInput) {
       jevMaxInput.value = state.config.jevMaxAttributes || 3;
     }
-    const geminiInput = document.getElementById('input-gemini-api-key');
-    if (geminiInput) {
-      geminiInput.value = state.config.geminiApiKey || '';
-    }
-    const geminiModelInput = document.getElementById('input-gemini-model');
-    if (geminiModelInput) {
-      geminiModelInput.value = state.config.geminiModel || 'gemini-3.1-flash-lite';
-    }
 
     const detectedEl = document.getElementById('detected-db-id');
     if (detectedEl) {
@@ -621,12 +613,10 @@ class UIManager {
     const container = document.getElementById('sync-badges-container');
     if (!container) return;
 
-    const { yahooAppId, geminiApiKey, geminiModel, jevApiKey, itemDbId, locationDbId, configDbId } = state.config;
-    const modelShort = (geminiModel || '3.1 Flash-Lite').replace(/^gemini-/, '');
+    const { yahooAppId, jevApiKey, itemDbId, locationDbId, configDbId } = state.config;
     const items = [
       { label: 'Yahoo!商品検索', active: Boolean(yahooAppId) },
-      { label: `Gemini (${modelShort})`, active: Boolean(geminiApiKey) },
-      { label: 'Jev属性分類', active: Boolean(jevApiKey) },
+      { label: 'Jev AI (整形・分類)', active: Boolean(jevApiKey) },
       { label: '物品/場所DB', active: Boolean(itemDbId && locationDbId) },
       { label: '設定テーブル', active: Boolean(configDbId) }
     ];
@@ -770,7 +760,6 @@ class UIManager {
       if (cfg.yahooAppId) url.searchParams.set('yappid', cfg.yahooAppId);
       if (cfg.jevApiKey) url.searchParams.set('jev', cfg.jevApiKey);
       if (cfg.jevMaxAttributes) url.searchParams.set('jevmax', String(cfg.jevMaxAttributes));
-      if (cfg.geminiApiKey) url.searchParams.set('gemini', cfg.geminiApiKey);
     }
     return url.toString();
   }

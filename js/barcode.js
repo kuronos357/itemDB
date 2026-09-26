@@ -7,7 +7,6 @@
  */
 
 import { JevService } from './jev.js';
-import { GeminiService } from './gemini.js';
 
 // クライアント側インメモリキャッシュ (同一バーコードの再読取ブレを完全に防止)
 const CLIENT_JAN_CACHE = new Map();
@@ -101,63 +100,41 @@ export class BarcodeService {
       // 分類に使用するテキスト（LLM整形前の元テキストの方が特徴量・用途語彙が豊富で正確に分類可能）
       const textForClassify = result.rawTitle || result.title || '';
 
-      // AI処理を並行実行 (商品名要約と属性分類を同時に行い、待ち時間を半減)
+      // AI処理 (Jev): 商品名スマート整形と属性分類を並行実行 (待ち時間約0.2秒)
       const aiTasks = [];
 
-      // 1. 商品名スマート整形 (Gemini): タイトルが長文(25文字以上)または記号が多い場合に優先実行
-      if (options.geminiApiKey && result.title && !result.title.startsWith('市販品 (JAN:') && result.title.length > 25) {
+      // 1. 商品名スマート整形 (Jev): 長文タイトル(20文字超)から不要な宣伝・用途キーワードを除外
+      if (options.jevApiKey && result.title && !result.title.startsWith('市販品 (JAN:') && result.title.length > 20) {
         aiTasks.push(
-          GeminiService.cleanProductTitle(result.title, options.geminiApiKey, options.geminiModel)
+          JevService.cleanProductTitle(result.title, options.jevApiKey)
             .then(cleanTitle => {
-              if (cleanTitle) {
+              if (cleanTitle && cleanTitle !== result.title) {
                 if (!result.rawTitle) result.rawTitle = result.title;
                 result.title = cleanTitle;
               }
             })
-            .catch(geminiErr => {
-              console.warn('[BarcodeService] Gemini title cleanup error:', geminiErr);
+            .catch(err => {
+              console.warn('[BarcodeService] Jev title cleanup error:', err);
             })
         );
       }
 
-      // 2. 属性（カテゴリ）自動分類 (Jev / Gemini): 修正前の豊富な情報量を持つテキストを用いて高精度分類
-      if (candidateAttrs.length > 0 && textForClassify && !textForClassify.startsWith('市販品 (JAN:')) {
-        const classifyTask = async () => {
-          let classified = [];
-          if (options.jevApiKey) {
-            try {
-              const cats = await JevService.classify(
-                textForClassify,
-                options.jevApiKey,
-                candidateAttrs,
-                { maxAttributes: options.jevMaxAttributes }
-              );
-              if (Array.isArray(cats) && cats.length > 0) classified = cats;
-            } catch (e) {
-              console.warn('[BarcodeService] Jev error:', e);
+      // 2. 属性（カテゴリ）自動分類 (Jev): 修正前の豊富な情報量を持つテキストを用いて高精度分類
+      if (candidateAttrs.length > 0 && textForClassify && !textForClassify.startsWith('市販品 (JAN:') && options.jevApiKey) {
+        aiTasks.push(
+          JevService.classify(
+            textForClassify,
+            options.jevApiKey,
+            candidateAttrs,
+            { maxAttributes: options.jevMaxAttributes }
+          ).then(cats => {
+            if (Array.isArray(cats) && cats.length > 0) {
+              result.attributes = cats;
             }
-          }
-          if (classified.length === 0 && options.geminiApiKey) {
-            try {
-              const maxN = Math.max(1, parseInt(options.jevMaxAttributes, 10) || 3);
-              const cats = await GeminiService.classifyAttributes(
-                textForClassify,
-                options.geminiApiKey,
-                candidateAttrs,
-                maxN,
-                options.geminiModel
-              );
-              if (Array.isArray(cats) && cats.length > 0) classified = cats;
-            } catch (e) {
-              console.warn('[BarcodeService] Gemini classify error:', e);
-            }
-          }
-          if (classified.length > 0) {
-            result.attributes = classified;
-          }
-        };
-
-        aiTasks.push(classifyTask());
+          }).catch(err => {
+            console.warn('[BarcodeService] Jev classify error:', err);
+          })
+        );
       }
 
       if (aiTasks.length > 0) {

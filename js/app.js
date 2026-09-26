@@ -12,7 +12,6 @@ import { feedback } from './audio.js';
 import { ui } from './ui.js';
 import { BarcodeService } from './barcode.js';
 import { JevService } from './jev.js';
-import { GeminiService } from './gemini.js';
 
 class Application {
   constructor() {
@@ -119,10 +118,6 @@ class Application {
 
     document.getElementById('btn-test-jev')?.addEventListener('click', () => {
       this._testJevConnection();
-    });
-
-    document.getElementById('btn-test-gemini')?.addEventListener('click', () => {
-      this._testGeminiConnection();
     });
 
     // Notion側設定テーブルとの同期ボタン
@@ -330,10 +325,9 @@ class Application {
     const yappid = params.get('yappid') || params.get('yahooAppId') || params.get('yahoo');
     const jev = params.get('jev') || params.get('jevApiKey') || params.get('jev_api_key');
     const jevMax = params.get('jevmax') || params.get('jev_max') || params.get('jevMax');
-    const gemini = params.get('gemini') || params.get('geminiApiKey') || params.get('gemini_api_key');
     const id = params.get('id');
 
-    if (dbid || api || jev || jevMax || yappid || gemini) {
+    if (dbid || api || jev || jevMax || yappid) {
       const hasDirectId = (id && /^\d+$/.test(id));
       await this._applySetupConfig({
         dbId: dbid,
@@ -342,8 +336,7 @@ class Application {
         proxyMode: proxy,
         yahooAppId: yappid,
         jevApiKey: jev,
-        jevMaxAttributes: jevMax ? parseInt(jevMax, 10) : undefined,
-        geminiApiKey: gemini
+        jevMaxAttributes: jevMax ? parseInt(jevMax, 10) : undefined
       }, null, !hasDirectId);
 
       // URLから秘密トークンを除去
@@ -388,7 +381,6 @@ class Application {
     if (config.yahooAppId) updates.yahooAppId = config.yahooAppId;
     if (config.jevApiKey) updates.jevApiKey = config.jevApiKey;
     if (config.jevMaxAttributes !== undefined) updates.jevMaxAttributes = config.jevMaxAttributes;
-    if (config.geminiApiKey) updates.geminiApiKey = config.geminiApiKey;
 
     state.saveConfig(updates);
 
@@ -629,12 +621,10 @@ class Application {
       // 2. 既存の属性オプション（Notion DBの属性選択肢）を取得
       const candidateAttributes = await notion.getAttributeOptions();
 
-      // 3. openBD / Google Books (ISBN) または Yahoo! / Open Food Facts / Jev / Gemini (JAN) による情報取得
+      // 3. openBD / Google Books (ISBN) または Yahoo! / Open Food Facts / Jev (JAN) による情報取得
       const itemData = await BarcodeService.lookup(code, {
         jevApiKey: state.config.jevApiKey,
         jevMaxAttributes: state.config.jevMaxAttributes,
-        geminiApiKey: state.config.geminiApiKey,
-        geminiModel: state.config.geminiModel,
         candidateAttributes,
         yahooAppId: state.config.yahooAppId,
         existingRecord
@@ -966,10 +956,7 @@ class Application {
     const jevApiKey = document.getElementById('input-jev-api-key')?.value.trim();
     const jevMaxRaw = document.getElementById('input-jev-max-attributes')?.value;
     const jevMaxAttributes = jevMaxRaw ? Math.max(1, parseInt(jevMaxRaw, 10) || 3) : 3;
-    const geminiApiKey = document.getElementById('input-gemini-api-key')?.value.trim();
-    const geminiModel = document.getElementById('input-gemini-model')?.value.trim() || 'gemini-3.1-flash-lite';
-
-    state.saveConfig({ apiKey, dbId, yahooAppId, jevApiKey, jevMaxAttributes, geminiApiKey, geminiModel, proxyMode: 'cloudflare' });
+    state.saveConfig({ apiKey, dbId, yahooAppId, jevApiKey, jevMaxAttributes, proxyMode: 'cloudflare' });
 
     document.getElementById('settings-modal')?.classList.add('hidden');
     ui.showToast('設定を保存しました', 'success');
@@ -1006,9 +993,8 @@ class Application {
     const jevApiKey = document.getElementById('input-jev-api-key')?.value.trim();
     const jevMaxRaw = document.getElementById('input-jev-max-attributes')?.value;
     const jevMaxAttributes = jevMaxRaw ? Math.max(1, parseInt(jevMaxRaw, 10) || 3) : 3;
-    const geminiApiKey = document.getElementById('input-gemini-api-key')?.value.trim();
 
-    state.saveConfig({ apiKey, dbId, yahooAppId, jevApiKey, jevMaxAttributes, geminiApiKey, proxyMode: 'cloudflare' });
+    state.saveConfig({ apiKey, dbId, yahooAppId, jevApiKey, jevMaxAttributes, proxyMode: 'cloudflare' });
 
     try {
       const info = await notion.testConnection();
@@ -1147,51 +1133,6 @@ class Application {
   }
 
   /**
-   * Gemini API 疎通テスト
-   */
-  async _testGeminiConnection() {
-    const btn = document.getElementById('btn-test-gemini');
-    const statusEl = document.getElementById('gemini-status-msg');
-    if (!btn || !statusEl) return;
-
-    const geminiApiKey = document.getElementById('input-gemini-api-key')?.value.trim();
-    const geminiModel = document.getElementById('input-gemini-model')?.value.trim() || state.config.geminiModel || 'gemini-3.1-flash-lite';
-
-    if (!geminiApiKey) {
-      statusEl.textContent = 'Gemini APIキーを入力してください。未設定時は通常整形のみ動作します。';
-      statusEl.className = 'status-text text-warning';
-      return;
-    }
-
-    btn.disabled = true;
-    statusEl.textContent = `Gemini API 接続テスト中 (${geminiModel})...`;
-    statusEl.className = 'status-text text-muted';
-
-    try {
-      const res = await GeminiService.testConnection(geminiApiKey, geminiModel);
-      if (res.ok) {
-        state.config.geminiApiKey = geminiApiKey;
-        state.config.geminiModel = geminiModel;
-        state.saveConfig(state.config);
-        statusEl.innerHTML = `✓ ${res.message}`;
-        statusEl.className = 'status-text text-success';
-        ui._updateSyncBadges();
-        feedback.playSuccess();
-      } else {
-        statusEl.textContent = `✕ ${res.message}`;
-        statusEl.className = 'status-text text-danger';
-        feedback.playError();
-      }
-    } catch (e) {
-      statusEl.textContent = `✕ エラー: ${e.message}`;
-      statusEl.className = 'status-text text-danger';
-      feedback.playError();
-    } finally {
-      btn.disabled = false;
-    }
-  }
-
-  /**
    * Notion側「設定」テーブルから最新の設定を読み込んでフォームに反映
    */
   async _loadSettingsFromNotion() {
@@ -1257,8 +1198,6 @@ class Application {
     const jevApiKey = document.getElementById('input-jev-api-key')?.value.trim();
     const jevMaxRaw = document.getElementById('input-jev-max-attributes')?.value;
     const jevMaxAttributes = jevMaxRaw ? Math.max(1, parseInt(jevMaxRaw, 10) || 3) : 3;
-    const geminiApiKey = document.getElementById('input-gemini-api-key')?.value.trim();
-    const geminiModel = document.getElementById('input-gemini-model')?.value.trim() || state.config.geminiModel || 'gemini-3.1-flash-lite';
 
     if (!apiKey || !dbId) {
       ui.showToast('Notion APIキーとデータベースIDを入力してください', 'warning');
@@ -1272,7 +1211,7 @@ class Application {
     }
 
     try {
-      state.saveConfig({ apiKey, dbId, yahooAppId, jevApiKey, jevMaxAttributes, geminiApiKey, geminiModel, proxyMode: 'cloudflare' });
+      state.saveConfig({ apiKey, dbId, yahooAppId, jevApiKey, jevMaxAttributes, proxyMode: 'cloudflare' });
       const count = await notion.saveConfigToNotion({
         apiKey,
         dbId,
@@ -1280,9 +1219,7 @@ class Application {
         locationDbId: state.config.locationDbId,
         yahooAppId,
         jevApiKey,
-        jevMaxAttributes,
-        geminiApiKey,
-        geminiModel
+        jevMaxAttributes
       });
 
       ui._updateSyncBadges();

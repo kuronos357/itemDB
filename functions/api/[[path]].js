@@ -7,7 +7,6 @@
  */
 
 import { onRequest as onJanRequest } from "./jan.js";
-import { onRequest as onGeminiRequest } from "./gemini.js";
 
 export async function onRequest(context) {
   const { request, params } = context;
@@ -31,11 +30,6 @@ export async function onRequest(context) {
   // JANコード検索API (/api/jan)
   if (path === "jan" || path === "jan/") {
     return await onJanRequest(context);
-  }
-
-  // Gemini API プロキシ (/api/gemini)
-  if (path === "gemini" || path === "gemini/") {
-    return await onGeminiRequest(context);
   }
 
   // Jev (TypeSafe AI) プロキシ (/api/jev)

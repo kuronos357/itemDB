@@ -34,7 +34,7 @@
       <div class="logo-section">
         <div style="display: flex; align-items: baseline; gap: 6px;">
           <h1 class="app-title">itemDB</h1>
-          <span class="badge" style="font-size: 0.7rem; padding: 1px 5px; background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 4px; font-weight: 500;">v49</span>
+          <span class="badge" style="font-size: 0.7rem; padding: 1px 5px; background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 4px; font-weight: 500;">v50</span>
         </div>
         <span class="app-subtitle">Logistics & Cache</span>
       </div>
@@ -153,7 +153,7 @@
           <div class="mt-2" style="border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 8px;">
             <!-- 疎通テストボタン群 -->
             <label style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px; display: block;">各APIの疎通テスト</label>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 8px;">
               <button id="btn-test-connection" class="btn btn-secondary btn-sm" style="font-size: 0.75rem;">
                 <span>Notion 疎通</span>
               </button>
@@ -163,14 +163,10 @@
               <button id="btn-test-jev" class="btn btn-secondary btn-sm" style="font-size: 0.75rem;">
                 <span>Jev 接続</span>
               </button>
-              <button id="btn-test-gemini" class="btn btn-secondary btn-sm" style="font-size: 0.75rem;">
-                <span>Gemini 接続</span>
-              </button>
             </div>
             <span id="connection-status-msg" class="status-text mt-1" style="font-size: 0.72rem;"></span>
             <span id="yahoo-status-msg" class="status-text mt-1" style="font-size: 0.72rem;"></span>
             <span id="jev-status-msg" class="status-text mt-1" style="font-size: 0.72rem;"></span>
-            <span id="gemini-status-msg" class="status-text mt-1" style="font-size: 0.72rem;"></span>
 
             <!-- 個別APIキー入力欄 -->
             <div class="form-group mt-2">
@@ -179,17 +175,7 @@
             </div>
 
             <div class="form-group mt-1">
-              <label for="input-gemini-api-key" style="font-size: 0.78rem;">Gemini APIキー (Google AI Studio)</label>
-              <input type="password" id="input-gemini-api-key" class="form-input form-input-sm" placeholder="AIzaSyxxxxxxxxxxxxxxxxx" style="font-size: 0.8rem;">
-            </div>
-
-            <div class="form-group mt-1">
-              <label for="input-gemini-model" style="font-size: 0.78rem;">Gemini モデル名 (Notion設定優先 / デフォルト: gemini-3.1-flash-lite)</label>
-              <input type="text" id="input-gemini-model" class="form-input form-input-sm" placeholder="gemini-3.1-flash-lite" style="font-size: 0.8rem;">
-            </div>
-
-            <div class="form-group mt-1">
-              <label for="input-jev-api-key" style="font-size: 0.78rem;">Jev APIキー (TypeSafe AI)</label>
+              <label for="input-jev-api-key" style="font-size: 0.78rem;">Jev APIキー (TypeSafe AI: タイトル整形＆カテゴリ分類)</label>
               <input type="password" id="input-jev-api-key" class="form-input form-input-sm" placeholder="jev_xxxxxxxxxxxxxxxx" style="font-size: 0.8rem;">
             </div>
 
@@ -206,7 +192,7 @@
             📱 別端末 (スマホ/Apple Watch) 連携
           </summary>
           <div class="mt-2" style="border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 8px;">
-            <p class="text-sub" style="font-size: 0.72rem; margin: 0 0 8px;">Notion接続キーのみを含む軽量URL/QRです。開いた端末でNotionから最新設定（Yahoo・Gemini等）を自動インポートします。</p>
+            <p class="text-sub" style="font-size: 0.72rem; margin: 0 0 8px;">Notion接続キーのみを含む軽量URL/QRです。開いた端末でNotionから最新設定（Yahoo・Jev等）を自動インポートします。</p>
             <div style="display: flex; gap: 8px;">
               <button id="btn-generate-setup-qr" class="btn btn-secondary btn-sm" style="flex: 1; font-size: 0.75rem;">
                 <span>設定用QRを生成</span>
@@ -229,7 +215,7 @@
         </details>
       </div>
       <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-color); padding: 12px 16px;">
-        <span class="text-sub" style="font-size: 0.75rem; color: var(--text-muted);">itemDB Build 49</span>
+        <span class="text-sub" style="font-size: 0.75rem; color: var(--text-muted);">itemDB Build 50</span>
         <button id="btn-save-settings" class="btn btn-primary" style="padding: 8px 20px;">設定を保存</button>
       </div>
     </div>
