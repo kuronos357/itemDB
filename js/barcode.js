@@ -349,12 +349,12 @@ export class BarcodeService {
    * JANコードによる一般商品情報の検索 (Yahoo!ショッピングAPI / Open Food Facts / Google Books / Notion既存情報 / フォールバック)
    */
   static async _lookupJan(jan, options = {}) {
+    let apiMessage = '';
+
     // 1. Cloudflare Functions /api/jan (Yahoo!ショッピングAPI & サーバーサイド検索)
     try {
       const isLocal = (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'));
       const janEndpoint = isLocal ? 'https://itemdb.pages.dev/api/jan' : '/api/jan';
-
-      let apiMessage = '';
       const queryParams = new URLSearchParams({ code: jan });
       if (options.yahooAppId) {
         queryParams.set('appid', options.yahooAppId);

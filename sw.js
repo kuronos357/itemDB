@@ -3,7 +3,7 @@
  * アプリケーションシェルのオフラインキャッシュ
  */
 
-const CACHE_NAME = 'itemdb-cache-v47';
+const CACHE_NAME = 'itemdb-cache-v48';
 const ASSETS_TO_CACHE = [
   './',
   './style.css',
@@ -61,36 +61,49 @@ self.addEventListener('message', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Notion APIや外部CDNのリクエストはネットワーク優先
+  // Notion APIや外部CDNのリクエストはネットワーク直通 (キャッシュしない)
   if (event.request.url.includes('api.notion.com') ||
       event.request.url.includes('/api/') ||
       event.request.url.includes('corsproxy.io') ||
+      event.request.url.includes('typesafe.ai') ||
+      event.request.url.includes('googleapis.com') ||
+      event.request.url.includes('openfoodfacts.org') ||
+      event.request.url.includes('openbd.jp') ||
+      event.request.url.includes('ndlsearch.ndl.go.jp') ||
+      event.request.url.includes('yahooapis.jp') ||
       event.request.method !== 'GET') {
     return;
   }
 
-  // ナビゲーションリクエスト（HTMLページのトップレベル表示）: Network-First（オンライン時は最新取得、オフライン時はキャッシュ）
-  if (event.request.mode === 'navigate') {
+  // ナビゲーションリクエスト & JS/CSS (コード更新が確実に反映されるようネットワーク優先)
+  const url = new URL(event.request.url);
+  const isCodeAsset = url.pathname.endsWith('.js') || url.pathname.endsWith('.css');
+
+  if (event.request.mode === 'navigate' || isCodeAsset) {
     event.respondWith(
       fetch(event.request).then((networkResponse) => {
         if (networkResponse && networkResponse.status === 200) {
           const responseToCache = cleanResponse(networkResponse.clone());
+          const cacheKey = event.request.mode === 'navigate' ? './' : event.request;
           caches.open(CACHE_NAME).then((cache) => {
-            cache.put('./', responseToCache);
+            cache.put(cacheKey, responseToCache);
           });
         }
         return cleanResponse(networkResponse);
       }).catch(() => {
-        return caches.match('./').then((cachedResponse) => {
-          if (cachedResponse) return cleanResponse(cachedResponse);
-          return caches.match('./index.html').then(cleanResponse);
-        });
+        if (event.request.mode === 'navigate') {
+          return caches.match('./').then((cachedResponse) => {
+            if (cachedResponse) return cleanResponse(cachedResponse);
+            return caches.match('./index.html').then(cleanResponse);
+          });
+        }
+        return caches.match(event.request).then(cleanResponse);
       })
     );
     return;
   }
 
-  // 通常のアセットリクエスト
+  // その他の静的アセット (icons, manifest等): キャッシュ優先
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
@@ -98,7 +111,6 @@ self.addEventListener('fetch', (event) => {
       }
 
       // /index.html へのリクエスト時のフォールバック
-      const url = new URL(event.request.url);
       if (url.pathname.endsWith('/index.html')) {
         return caches.match('./').then((rootResponse) => {
           if (rootResponse) return cleanResponse(rootResponse);

@@ -647,7 +647,7 @@ class Application {
         itemData,
         existingRecord,
         async (formData) => {
-          await this._registerBarcodeItem(formData);
+          return await this._registerBarcodeItem(formData);
         }
       );
     } catch (err) {
