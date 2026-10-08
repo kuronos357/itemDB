@@ -540,18 +540,20 @@ class Application {
       // レコードが存在しない場合、新規登録を提案・作成
       if (!record) {
         const typeName = isItem ? '物品' : '場所';
-        const ok = confirm(`ID #${numericStr} は未登録の【${typeName}】です。Notionに新規作成しますか？`);
-        if (!ok) {
+        const defaultName = isItem ? `物品 #${numericStr}` : `場所 #${numericStr}`;
+        const inputName = prompt(`ID #${numericStr} は未登録の【${typeName}】です。\nNotionに登録する名前を入力してください:`, '');
+        if (inputName === null) {
           ui.setLoading(false);
           return;
         }
+        const finalName = inputName.trim() || defaultName;
+        ui.setLoading(true, `Notionに「${finalName}」を作成中...`);
         record = await notion.createRecord({
           numericId: numericStr,
-          name: `${typeName} #${numericStr}`,
+          name: finalName,
           isItem
         });
-        ui.showToast(`✓ ${typeName} #${numericStr} をNotionに登録しました`, 'success', 4000);
-        alert(`【Notion新規作成 成功】\n\n${typeName} #${numericStr} をNotionに作成しました！`);
+        ui.showToast(`✓ ${typeName}「${finalName}」(#${numericStr}) をNotionに登録しました`, 'success', 4000);
       }
 
       state.addHistory({

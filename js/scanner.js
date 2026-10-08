@@ -425,42 +425,87 @@ class ScannerService extends EventTarget {
   }
 
   /**
-   * Web NFCが利用可能かどうかを判定
+   * ローカルPaSoRiブリッジの疎通確認
    */
-  isNfcSupported() {
-    return ('NDEFReader' in window);
+  async checkLocalBridge() {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 800);
+      const res = await fetch('http://127.0.0.1:8765/status', {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      if (res.ok) {
+        const data = await res.json();
+        this._localBridgeAvailable = Boolean(data.reader_connected);
+        this._localBridgeInfo = data;
+        return data;
+      }
+    } catch {
+      this._localBridgeAvailable = false;
+    }
+    return null;
   }
 
   /**
-   * Web NFC APIによりNFCタグへURLを書き込む
+   * Web NFC または ローカルPaSoRiブリッジが利用可能かどうかを判定
+   */
+  isNfcSupported() {
+    return ('NDEFReader' in window) || (this._localBridgeAvailable === true);
+  }
+
+  getNfcType() {
+    if ('NDEFReader' in window) return 'webnfc';
+    if (this._localBridgeAvailable === true) return 'pasori_bridge';
+    return null;
+  }
+
+  /**
+   * NFCタグへURLを書き込む (Web NFC または PaSoRiローカルブリッジ)
    * @param {string} url 書き込むURL
    * @param {AbortSignal} [signal] 書き込み待機キャンセル用シグナル
    */
   async writeNfc(url, signal = null) {
-    if (!this.isNfcSupported()) {
-      throw new Error('お使いの環境（ブラウザ/OS）はWeb NFC書き込みに対応していません。');
+    // 1. ネイティブ Web NFC (Android Chrome等)
+    if ('NDEFReader' in window) {
+      try {
+        const ndef = new window.NDEFReader();
+        const options = {};
+        if (signal) options.signal = signal;
+
+        await ndef.write({
+          records: [
+            {
+              recordType: 'url',
+              data: url
+            }
+          ]
+        }, options);
+
+        return true;
+      } catch (err) {
+        console.error('[Scanner] Web NFC Write Error:', err);
+        throw err;
+      }
     }
 
+    // 2. ローカルPaSoRiブリッジ (Windows PC/SC)
     try {
-      const ndef = new window.NDEFReader();
-      const options = {};
-      if (signal) {
-        options.signal = signal;
+      const res = await fetch('http://127.0.0.1:8765/write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+        signal: signal || undefined
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'PaSoRiへの書き込みに失敗しました。');
       }
-
-      await ndef.write({
-        records: [
-          {
-            recordType: 'url',
-            data: url
-          }
-        ]
-      }, options);
-
       return true;
     } catch (err) {
-      console.error('[Scanner] NFC Write Error:', err);
-      throw err;
+      if (err.name === 'AbortError') throw err;
+      console.error('[Scanner] PaSoRi Bridge Write Error:', err);
+      throw new Error(err.message || 'PaSoRiサーバーへの通信に失敗しました。');
     }
   }
 }

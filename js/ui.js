@@ -697,7 +697,7 @@ class UIManager {
   /**
    * ラベル・QR・NFC発行モーダルの表示・生成
    */
-  renderLabelModal(itemOrLocation, type = 'item') {
+  async renderLabelModal(itemOrLocation, type = 'item') {
     const modal = document.getElementById('label-modal');
     if (!modal || !itemOrLocation) return;
 
@@ -728,9 +728,23 @@ class UIManager {
     if (statusBox) statusBox.classList.add('hidden');
     if (writeBtn) writeBtn.disabled = false;
 
+    // ローカルPaSoRiブリッジの接続チェック
+    await scanner.checkLocalBridge();
+
     if (scanner.isNfcSupported()) {
       if (supportedBox) supportedBox.classList.remove('hidden');
       if (unsupportedBox) unsupportedBox.classList.add('hidden');
+
+      const nfcType = scanner.getNfcType();
+      if (writeBtn) {
+        if (nfcType === 'pasori_bridge') {
+          writeBtn.innerHTML = '<span>📡 PaSoRiでタグに書き込む</span>';
+          writeBtn.title = 'PaSoRiの上にタグを置いて押してください';
+        } else {
+          writeBtn.innerHTML = '<span>📲 NFCタグにかざして書き込む</span>';
+          writeBtn.title = 'スマートフォンの背面にNFCタグをかざしてください';
+        }
+      }
     } else {
       if (supportedBox) supportedBox.classList.add('hidden');
       if (unsupportedBox) unsupportedBox.classList.remove('hidden');
@@ -895,15 +909,21 @@ class UIManager {
     }
     this.nfcAbortController = new AbortController();
 
+    const nfcType = scanner.getNfcType();
     if (statusBox) statusBox.classList.remove('hidden');
     if (writeBtn) writeBtn.disabled = true;
-    if (msgEl) msgEl.textContent = 'スマートフォンの背面にNFCタグをかざしてください...';
+    if (msgEl) {
+      msgEl.textContent = (nfcType === 'pasori_bridge')
+        ? 'PaSoRiの上にNFCタグを置いてください...'
+        : 'スマートフォンの背面にNFCタグをかざしてください...';
+    }
 
     try {
       await scanner.writeNfc(url, this.nfcAbortController.signal);
       feedback.playSuccess();
-      this.showToast('NFCタグへの書き込みが完了しました！', 'success');
-      if (msgEl) msgEl.innerHTML = '<span style="color:#4ade80;">✓ 書き込みが完了しました！</span>';
+      const okMsg = (nfcType === 'pasori_bridge') ? 'PaSoRiへのタグ書き込みが完了しました！' : 'NFCタグへの書き込みが完了しました！';
+      this.showToast(okMsg, 'success');
+      if (msgEl) msgEl.innerHTML = `<span style="color:#4ade80;">✓ ${okMsg}</span>`;
       setTimeout(() => {
         if (statusBox) statusBox.classList.add('hidden');
         if (writeBtn) writeBtn.disabled = false;
